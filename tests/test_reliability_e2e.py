@@ -401,13 +401,21 @@ def run_discovery_on(w: EvalWorld, ev: EvidenceSet, exp: Any) -> tuple[str, ...]
     from experionyx.failures.config import DiscoveryConfig
     from experionyx.failures.engine import run_discovery
 
-    home = ev.investigation
+    # Only the modes THIS discovery created: everything already registered (from the original
+    # design, and from earlier tests) belongs to other sources and must not be selected.
+    before = {m.id for m in w.registry.find(FailureMode)}
     run_discovery(
-        w.registry, w.store, w.executor, home, [], [exp.fault_experiment.id], DiscoveryConfig()
+        w.registry,
+        w.store,
+        w.executor,
+        ev.investigation,
+        [],
+        [exp.fault_experiment.id],
+        DiscoveryConfig(),
     )
-    fresh = [m.id for m in w.registry.find(FailureMode) if m.id not in ev.mode_ids]
-    assert fresh
-    return tuple(sorted(fresh))[:2]
+    fresh = {m.id for m in w.registry.find(FailureMode)} - before
+    assert fresh, "the other-dataset discovery should have produced new modes"
+    return tuple(sorted(fresh))
 
 
 def test_invalid_anchors_are_refused_with_explicit_reasons(ev: EvidenceSet) -> None:
@@ -469,7 +477,7 @@ def test_provenance_changes_when_an_included_lifecycle_state_or_run_changes(
     mode = next(
         m
         for m in w.registry.find(FailureMode)
-        if m.id in ev.mode_ids and m.status is FailureStatus.CANDIDATE
+        if m.id in ev.mode_ids and m.status in (FailureStatus.DISCOVERED, FailureStatus.CANDIDATE)
     )
     mode_change_status(
         w.registry, mode.id, FailureStatus.REJECTED, "reviewer", "test: lifecycle change"

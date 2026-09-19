@@ -11,6 +11,7 @@ from experionyx.adapters.capabilities import DeviceKind
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.failures.engine import DiscoveryRunResult, run_discovery
 from experionyx.failures.entities import FailureMode
+from experionyx.failures.taxonomy import FailureStatus
 from experionyx.faults.design import FaultDesign
 from experionyx.faults.lab import FaultExperimentResult, run_fault_experiment
 from experionyx.interactions.config import InteractionConfig
@@ -69,7 +70,14 @@ def full_evidence(tmp_path: Path, seeds: tuple[int, ...] = (1, 2, 3, 4)) -> Evid
     assert ia.analysis_id
     fx = (d.a.fault_experiment.id, d.b.fault_experiment.id, d.ab.fault_experiment.id)
     disc = run_discovery(w.registry, w.store, w.executor, d.investigation, [], list(fx))
-    modes = tuple(sorted(m.id for m in w.registry.find(FailureMode)))[:3]
+    # Prefer modes that are still open to lifecycle changes (DISCOVERED/CANDIDATE) so tests that
+    # change a mode's state never depend on which IDs happened to sort first.
+    open_states = (FailureStatus.DISCOVERED, FailureStatus.CANDIDATE)
+    ranked = sorted(w.registry.find(FailureMode), key=lambda m: (m.status not in open_states, m.id))
+    modes = tuple(sorted(m.id for m in ranked[:4]))
+    assert sum(m.status in open_states for m in ranked[:4]) >= 3, (
+        "the evidence set needs open modes"
+    )
     return EvidenceSet(d, disc, ia.analysis_id, modes)
 
 
