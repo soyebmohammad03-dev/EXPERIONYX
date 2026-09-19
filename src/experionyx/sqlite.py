@@ -48,12 +48,17 @@ from experionyx.failures.entities import (
 from experionyx.failures.taxonomy import NodeKind
 from experionyx.faults.entities import FaultAnalysis, FaultExperiment, FaultTrial
 from experionyx.hashing import canonical_json, content_hash
+from experionyx.interactions.entities import (
+    InteractionAnalysis,
+    InteractionEffect,
+    InteractionEvidence,
+)
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 
-DB_SCHEMA_VERSION = (
-    5  # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures
-)
+# PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
+# 6: interactions.
+DB_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -167,6 +172,35 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("subject_id", "predicate", "object_id"),
         since=5,
     ),
+    InteractionAnalysis: _Spec(
+        "interaction_analyses",
+        refs=(("investigation_id", Investigation), ("run_id", Run)),
+        plain=(
+            "spec_id",
+            "status",
+            "primary_metric",
+            "primary_class",
+            "structural_key",
+            "fault_a",
+            "fault_b",
+            "model_fingerprint",
+            "dataset_fingerprint",
+        ),
+        mutable=True,
+        since=6,
+    ),
+    InteractionEffect: _Spec(
+        "interaction_effects",
+        refs=(("analysis_id", InteractionAnalysis),),
+        plain=("level", "measure", "effect_status", "interaction_class"),
+        since=6,
+    ),
+    InteractionEvidence: _Spec(
+        "interaction_evidence",
+        refs=(("analysis_id", InteractionAnalysis),),
+        plain=("evidence_kind",),
+        since=6,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -261,11 +295,18 @@ def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    """Phase 7: interaction analyses, effects and evidence (new tables only)."""
+    for statement in _ddl(upto=6, since=6):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
     4: _migrate_4_to_5,
+    5: _migrate_5_to_6,
 }
 
 
@@ -386,6 +427,8 @@ class SqliteRegistry:
                 self._check_failure_evidence(entity)
             elif isinstance(entity, FailureRelationship):
                 self._check_failure_relationship(entity)
+            elif isinstance(entity, InteractionAnalysis):
+                self._check_interaction_analysis(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -399,6 +442,11 @@ class SqliteRegistry:
                 f"VALUES ({', '.join('?' * len(cols))})",
                 values,
             )
+
+    def _check_interaction_analysis(self, a: InteractionAnalysis) -> None:
+        run = self.get(Run, a.run_id)
+        if self.get(Experiment, run.experiment_id).investigation_id != a.investigation_id:
+            raise ValidationError("interaction analysis run belongs to a different investigation")
 
     def _check_failure_signal(self, sig: FailureSignal) -> None:
         run = self.get(Run, sig.run_id)
@@ -417,14 +465,23 @@ class SqliteRegistry:
             NodeKind.MODEL: RegisteredModel,
             NodeKind.DATASET: RegisteredDataset,
             NodeKind.FAILURE_MODE: FailureMode,
-            NodeKind.EVIDENCE: FailureEvidence,
             NodeKind.RUN: Run,
+            NodeKind.INTERACTION: InteractionAnalysis,
         }  # CLASS, SLICE and FAULT nodes are descriptors, not registry records
         for kind, node_id in ((rel.subject_kind, rel.subject_id), (rel.object_kind, rel.object_id)):
-            if kind in nodes:
+            if kind is NodeKind.EVIDENCE:
+                if not (
+                    self.exists(FailureEvidence, node_id)
+                    or self.exists(InteractionEvidence, node_id)
+                ):
+                    raise MissingReferenceError(
+                        f"failure_relationships EVIDENCE references missing evidence {node_id}"
+                    )
+            elif kind in nodes:
                 self._require(nodes[kind], node_id, f"failure_relationships {kind.value}")
             if (
                 kind is NodeKind.FAILURE_MODE
+                and NodeKind.INTERACTION not in (rel.subject_kind, rel.object_kind)
                 and self.get(FailureMode, node_id).investigation_id != rel.investigation_id
             ):
                 raise ValidationError("relationship crosses investigations")
@@ -537,10 +594,12 @@ class SqliteRegistry:
         ).fetchall()
         return [self._decode(cls, r[0], r[1], r[2]) for r in rows]
 
-    def update_status(self, entity: Experiment | Run | FaultExperiment | FailureMode) -> None:
+    def update_status(
+        self, entity: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+    ) -> None:
         with self.transaction():
-            current: Experiment | Run | FaultExperiment | FailureMode
-            expected: Experiment | Run | FaultExperiment | FailureMode
+            current: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+            expected: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
             if isinstance(entity, Experiment):
                 current = self.get(Experiment, entity.id)
                 expected = current.with_status(entity.status)
@@ -549,6 +608,9 @@ class SqliteRegistry:
                 expected = current.with_status(entity.status)
             elif isinstance(entity, FailureMode):
                 current = self.get(FailureMode, entity.id)
+                expected = current.with_status(entity.status)
+            elif isinstance(entity, InteractionAnalysis):
+                current = self.get(InteractionAnalysis, entity.id)
                 expected = current.with_status(entity.status)
             else:
                 current = self.get(Run, entity.id)

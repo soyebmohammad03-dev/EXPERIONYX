@@ -151,7 +151,8 @@ A→B and B→A have different identities and are applied in the stated order (t
 Repeating a compound fault derives per-component seeds deterministically. Sweeping a compound's
 parameters is not supported. `describe_interaction` records effect(A), effect(B), effect(A+B) and
 an additive reference, explicitly **descriptive**: a difference from the additive reference is not
-evidence of interaction; that needs a defined interaction model and factorial design (later).
+evidence of interaction; that needs a defined interaction model and factorial design, now provided by
+[interactions.md](interactions.md).
 
 ## Safety limits
 `FaultLimits`: `max_points`, `max_repetitions`, `max_total_runs`, `max_total_sample_evaluations`,

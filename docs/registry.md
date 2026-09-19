@@ -33,7 +33,7 @@ updates are compare-and-swap. Single connection per object, one thread; concurre
 serialize on the SQLite lock. See [execution.md](execution.md#concurrency).
 
 ## Schema versioning
-`PRAGMA user_version` holds `DB_SCHEMA_VERSION` (currently 5; v4 added the fault-laboratory tables, v5 the failure tables `failure_signals`, `failure_clusters`, `failure_modes`, `failure_evidence`, `failure_relationships`): v2 added `provenance`/`outcomes`
+`PRAGMA user_version` holds `DB_SCHEMA_VERSION` (currently 6; v6 added `interaction_analyses`, `interaction_effects` and `interaction_evidence`; v4 added the fault-laboratory tables, v5 the failure tables `failure_signals`, `failure_clusters`, `failure_modes`, `failure_evidence`, `failure_relationships`): v2 added `provenance`/`outcomes`
 (and gave artifacts a name and category), v3 added `models`/`datasets` (and `inputs` on
 provenance).  A new database is created at the latest version. An older database is **migrated in place**,
 one version at a time inside a single transaction (all steps or none), after copying the file to

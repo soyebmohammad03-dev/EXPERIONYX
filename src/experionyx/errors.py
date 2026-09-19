@@ -131,3 +131,16 @@ class FailureError(ExperionyxError):
 
 class FailureLimitError(FailureError):
     """A configured discovery bound was exceeded and the work cannot be done honestly."""
+
+
+class InteractionError(ExperionyxError):
+    """Base class for fault-interaction analysis problems."""
+
+
+class DesignRefusal(InteractionError):
+    """The experimental design cannot support an interaction analysis; nothing was analyzed.
+    `issues` lists every problem found (what was required, what was found, why it matters)."""
+
+    def __init__(self, issues: "tuple[object, ...]") -> None:
+        self.issues = issues
+        super().__init__("interaction design refused: " + "; ".join(str(i) for i in issues))

@@ -45,6 +45,12 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx failure confirm <fmd_…> --by WHO --reason WHY` | confirm a `SUPPORTED`, reproduced mode (an explicit decision) |
 | `experionyx failure set-status <fmd_…> --to REJECTED\|DEPRECATED\|… --by WHO --reason WHY` | validated lifecycle change (never to `CONFIRMED`) |
 | `experionyx failure graph <fmd_…>` | relationships around a mode (backend graph, no visualization) |
+| `experionyx interaction validate\|analyze SPEC.json [--format text]` | validate a four-cell design (refused with every issue listed before any run exists), or analyze it as a real Run |
+| `experionyx interaction list [--fault --metric --status --class --failure-mode --experiment --dataset --model]` | search registered interactions |
+| `experionyx interaction inspect <ian_…> [--full]` | effects, evidence, and (with `--full`) every effect record and raw trial |
+| `experionyx interaction failures\|replay\|export\|related <ian_…>` | failure-mode comparison; replay-and-compare (exit 1 on any difference); JSON bundle; structurally similar analyses |
+| `experionyx interaction reproduce <ian_…> --replicate <ian_…>` | check an independent replicate; moves `SUPPORTED` to `REPRODUCIBLE` only if it agrees |
+| `experionyx interaction confirm\|set-status <ian_…> --by WHO --reason WHY` | explicit human confirmation, or reject/deprecate |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`

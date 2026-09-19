@@ -24,6 +24,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
    discovered pattern is a candidate until it is reproduced and a person confirms it, and it never
    carries a causal claim ([failures.md](failures.md)).
 
+10. **An interaction is a contrast, not a cause.** Interaction analysis reports an additive contrast
+    with its uncertainty under an explicit, validated design, keeps observed, derived and interpreted
+    values apart, counts the hypotheses it tests, and never converts an observed contrast into a
+    causal claim ([interactions.md](interactions.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

@@ -86,6 +86,7 @@ class NodeKind(StrEnum):
     SLICE = "SLICE"
     EVIDENCE = "EVIDENCE"
     RUN = "RUN"
+    INTERACTION = "INTERACTION"
 
 
 class Predicate(StrEnum):
@@ -97,6 +98,10 @@ class Predicate(StrEnum):
     REPRODUCED_BY = "REPRODUCED_BY"
     CO_OCCURS_WITH = "CO_OCCURS_WITH"  # observed co-occurrence: NOT an interaction
     INTERACTS_WITH = "INTERACTS_WITH"  # reserved for a future, explicitly designed analysis
+    OBSERVED_WITH = "OBSERVED_WITH"  # seen together in one design; no direction implied
+    AMPLIFIED_UNDER = "AMPLIFIED_UNDER"  # higher prevalence under the compound treatment
+    SUPPRESSED_UNDER = "SUPPRESSED_UNDER"  # lower/absent prevalence under the compound treatment
+    ORDER_SENSITIVE_WITH = "ORDER_SENSITIVE_WITH"  # observed order effect between two faults
 
 
 ALLOWED_RELATIONSHIPS: frozenset[tuple[NodeKind, Predicate, NodeKind]] = frozenset(
@@ -110,5 +115,12 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[NodeKind, Predicate, NodeKind]] = frozens
         (NodeKind.FAILURE_MODE, Predicate.REPRODUCED_BY, NodeKind.RUN),
         (NodeKind.FAILURE_MODE, Predicate.CO_OCCURS_WITH, NodeKind.FAILURE_MODE),
         (NodeKind.FAILURE_MODE, Predicate.INTERACTS_WITH, NodeKind.FAILURE_MODE),
+        (NodeKind.FAULT, Predicate.OBSERVED_WITH, NodeKind.INTERACTION),
+        (NodeKind.FAILURE_MODE, Predicate.OBSERVED_WITH, NodeKind.INTERACTION),
+        (NodeKind.FAILURE_MODE, Predicate.AMPLIFIED_UNDER, NodeKind.INTERACTION),
+        (NodeKind.FAILURE_MODE, Predicate.SUPPRESSED_UNDER, NodeKind.INTERACTION),
+        (NodeKind.FAULT, Predicate.ORDER_SENSITIVE_WITH, NodeKind.FAULT),
+        (NodeKind.INTERACTION, Predicate.SUPPORTED_BY, NodeKind.RUN),
+        (NodeKind.INTERACTION, Predicate.SUPPORTED_BY, NodeKind.EVIDENCE),
     }
 )

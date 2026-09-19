@@ -2,11 +2,11 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 6 (failure registry and discovery).** The typed domain model, a local SQLite registry,
+> **Status: Phase 7 (fault interaction analysis).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
-> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. Drift, statistics and reports are
+> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. A rigorous fault interaction analysis engine (four-cell additive contrast, trial-level bootstrap, order effects, per-sample and failure-mode analysis) exists. Drift, general statistics and reports are
 > not implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -69,6 +69,12 @@ See [docs/architecture.md](docs/architecture.md) and
   reproduction check, and a validated lifecycle (`DISCOVERED` to `CONFIRMED`) in which nothing is
   confirmed automatically. It groups measured signals; it makes no causal claim and no LLM is
   involved.
+- Fault interaction analysis ([docs/interactions.md](docs/interactions.md)): a validated four-cell
+  design (control, A, B, A+B, optionally B+A), the additive interaction contrast with every
+  intermediate value, repeated trials with explicit pairing, a seeded bootstrap over trials, order
+  effects, verified per-sample alignment, failure-mode comparison, a lifecycle needing an
+  independent replicate and a human decision, and deterministic replay. It reports observed
+  contrasts; it never claims that one fault causes another.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

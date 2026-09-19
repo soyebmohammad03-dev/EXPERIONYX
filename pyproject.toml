@@ -64,6 +64,9 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PT", "RUF", "T20", "S"]
 "src/experionyx/evaluation/engine.py" = ["E501"]  # dense keyword-argument constructions
 "src/experionyx/evaluation/findings.py" = ["E501"]  # rule table and deterministic message templates
 "src/experionyx/failures/*.py" = ["E501"]  # dense transition/criteria tables
+"src/experionyx/interactions/*.py" = ["E501"]  # dense typed constructions and messages
+"tests/test_interaction*.py" = ["E501", "PT018", "C408"]
+"tests/interaction_helpers.py" = ["E501"]
 "tests/test_failure*.py" = ["E501", "PT018"]  # dense expectation tables; compound asserts read fine
 "tests/failure_helpers.py" = ["E501"]
 "examples/*" = ["T201", "S311"]  # demo output; random is for illustration, not security
@@ -96,6 +99,10 @@ module = [
     "test_failure_discovery",
     "test_failure_cli",
     "failure_helpers",
+    "test_interaction_model",
+    "test_interaction_e2e",
+    "test_interaction_cli",
+    "interaction_helpers",
 ]
 warn_unused_ignores = false
 disallow_untyped_calls = false
@@ -107,7 +114,7 @@ disable_error_code = ["operator", "call-overload", "arg-type", "assignment", "in
 
 [[tool.mypy.overrides]]
 # Framework-heavy tests index/call torch and numpy objects dynamically; src/ stays strict.
-module = ["test_sklearn_adapter", "test_torch_adapter", "test_adapter_e2e", "test_evaluation_engine", "test_eval_analysis", "test_evaluation_frameworks", "test_eval_metrics", "test_fault_spec", "test_fault_library", "test_fault_degradation", "test_fault_lab", "test_fault_frameworks", "test_failure_model", "test_failure_discovery", "test_failure_cli", "failure_helpers"]
+module = ["test_sklearn_adapter", "test_torch_adapter", "test_adapter_e2e", "test_evaluation_engine", "test_eval_analysis", "test_evaluation_frameworks", "test_eval_metrics", "test_fault_spec", "test_fault_library", "test_fault_degradation", "test_fault_lab", "test_fault_frameworks", "test_failure_model", "test_failure_discovery", "test_failure_cli", "failure_helpers", "test_interaction_model", "test_interaction_e2e", "test_interaction_cli", "interaction_helpers"]
 warn_unused_ignores = false
 disable_error_code = ["index", "operator", "call-overload", "arg-type", "attr-defined", "union-attr"]
 

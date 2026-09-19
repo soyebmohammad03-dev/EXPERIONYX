@@ -6,6 +6,7 @@ from typing import Protocol, TypeVar
 from experionyx.domain import Entity, Experiment, Run
 from experionyx.failures.entities import FailureMode
 from experionyx.faults.entities import FaultExperiment
+from experionyx.interactions.entities import InteractionAnalysis
 
 E = TypeVar("E", bound=Entity)
 
@@ -29,7 +30,9 @@ class Registry(Protocol):
         """All records of `cls` whose indexed fields equal `filters`, ordered by ID."""
         ...
 
-    def update_status(self, entity: Experiment | Run | FaultExperiment | FailureMode) -> None:
+    def update_status(
+        self, entity: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+    ) -> None:
         """Persist a legal status transition. Everything except `status` must be unchanged."""
         ...
 

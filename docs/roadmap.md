@@ -9,7 +9,8 @@
 4. Baseline evaluation / Model Autopsy (done)
 5. Fault Injection Laboratory (done)
 6. Failure Registry and Failure Discovery (done)
-7. Reproducibility + Statistical Engine
+7. Fault Interaction Analysis (done)
+7b. Reproducibility + Statistical Engine (planned; renumbered, not started)
 8. Drift Laboratory
 9. Evidence Graph
 10. Reliability Analysis

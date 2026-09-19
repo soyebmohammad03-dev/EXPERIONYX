@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from experionyx import __version__
 from experionyx.adapters.capabilities import DeviceKind, TaskType
@@ -28,7 +29,7 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
-from experionyx.errors import ArtifactIntegrityError, ExperionyxError
+from experionyx.errors import ArtifactIntegrityError, DesignRefusal, ExperionyxError
 from experionyx.evaluation.compare import compare_evaluations
 from experionyx.evaluation.config import (
     EvaluationConfig,
@@ -58,6 +59,20 @@ from experionyx.faults.lab import FaultExperimentResult, run_fault_experiment
 from experionyx.faults.library import default_fault_registry
 from experionyx.faults.report import analysis_run_id, load_analysis, read_artifact, summary_rows
 from experionyx.faults.spec import FaultRegistry, FaultScope, FaultSpec, ScopeKind
+from experionyx.interactions.config import InteractionSpec
+from experionyx.interactions.design import validate_report
+from experionyx.interactions.engine import run_interaction
+from experionyx.interactions.entities import InteractionAnalysis
+from experionyx.interactions.lifecycle import (
+    change_status as interaction_change_status,
+)
+from experionyx.interactions.lifecycle import (
+    check_reproduction,
+    confirm_by_review,
+    replay_check,
+)
+from experionyx.interactions.registry import InteractionRegistry
+from experionyx.interactions.taxonomy import InteractionStatus
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 
@@ -828,6 +843,268 @@ def _cmd_failure_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- interaction analysis ---------------------------------------------------------------------------------
+
+
+def _load_spec(path: str) -> InteractionSpec:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read spec {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("a spec file must be a JSON object")
+    if (
+        "cells" not in data
+    ):  # friendly form: {"control": [...], "a": [...], "b": [...], "ab": [...], ...}
+        cells = {k.upper(): data.pop(k) for k in ("control", "a", "b", "ab", "ba") if k in data}
+        data = {"cells": cells, **data}
+    return InteractionSpec.from_dict(data)
+
+
+def _emit(doc: dict[str, object], text: str, args: argparse.Namespace) -> None:
+    if getattr(args, "format", "json") == "text":
+        print(text)
+    else:
+        _dump(doc)
+
+
+def _interaction_row(a: InteractionAnalysis) -> dict[str, object]:
+    return {
+        "id": a.id,
+        "status": a.status.value,
+        "primary_metric": a.primary_metric,
+        "primary_class": a.primary_class.value,
+        "spec_id": a.spec_id,
+        "run_id": a.run_id,
+        "statement": a.summary["statement"],
+    }
+
+
+def _cmd_interaction_validate(args: argparse.Namespace) -> int:
+    spec = _load_spec(args.spec)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        report = validate_report(reg, store, spec)
+    lines = [f"spec {report['spec_id']}: {'VALID' if report['valid'] else 'REFUSED'}"]
+    issues: Any = report.get("issues", [])
+    checks: Any = report.get("checks", [])
+    lines += [
+        f"  - {i['code']}: required {i['required']}; found {i['found']}; {i['why']}" for i in issues
+    ]
+    lines += [f"  + {c}" for c in checks]
+    _emit(report, "\n".join(lines), args)
+    return 0 if report["valid"] else 1
+
+
+def _cmd_interaction_analyze(args: argparse.Namespace) -> int:
+    spec = _load_spec(args.spec)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        inv = (
+            args.investigation
+            or reg.get(Experiment, reg.get(Run, spec.control[0]).experiment_id).investigation_id
+        )
+        try:
+            res = run_interaction(
+                reg, store, _executor(reg, args.workspace), inv, spec, seed=args.seed
+            )
+        except DesignRefusal as exc:  # refused BEFORE any run is created
+            print(
+                "error: design refused; nothing was analyzed and nothing was recorded",
+                file=sys.stderr,
+            )
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        doc: dict[str, object] = {
+            "analysis_run": res.run_id,
+            "status": res.status.value,
+            "analysis_id": res.analysis_id,
+        }
+        if res.analysis_id:
+            a = reg.get(InteractionAnalysis, res.analysis_id)
+            doc["interaction"] = _interaction_row(a)
+        shown = doc.get("interaction")
+        said = shown["statement"] if isinstance(shown, dict) else ""
+        _emit(doc, f"{res.status.value}: {said}", args)
+        return 0 if res.status is RunStatus.COMPLETED else 1
+
+
+def _ireg(args: argparse.Namespace, reg: SqliteRegistry) -> InteractionRegistry:
+    return InteractionRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _cmd_interaction_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        found = _ireg(args, reg).search(
+            fault=args.fault,
+            metric=args.metric,
+            status=args.status,
+            failure_mode=args.failure_mode,
+            experiment=args.experiment,
+            dataset=args.dataset,
+            model=args.model,
+            primary_class=args.klass,
+            investigation=args.investigation,
+        )
+        _emit(
+            {
+                "interactions": [_interaction_row(a) for a in found],
+                "note": "labels describe an observed contrast under a design; they are not causal claims",
+            },
+            "\n".join(
+                f"{a.id} {a.status.value:20} {a.primary_class.value:28} {a.primary_metric}"
+                for a in found
+            ),
+            args,
+        )
+    return 0
+
+
+def _cmd_interaction_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        ir = _ireg(args, reg)
+        a = ir.get(args.id)
+        doc: dict[str, object] = {
+            **_record(a),
+            "effects": [
+                {
+                    "level": e.level.value,
+                    "measure": e.measure,
+                    "status": e.effect_status.value,
+                    "class": e.interaction_class.value,
+                    "interaction_contrast": (e.record["derived"] or {}).get("interaction_contrast")
+                    if isinstance(e.record["derived"], Mapping)
+                    else None,
+                }
+                for e in ir.effects(a.id)
+            ],
+            "evidence": [
+                {"kind": x.evidence_kind.value, "summary": x.summary} for x in ir.evidence(a.id)
+            ],
+        }
+        if args.full:
+            doc["effect_records"] = [_record(e) for e in ir.effects(a.id)]
+            doc["raw_trials"] = to_jsonable(ir.raw_trials(a.id))
+        _emit(
+            doc,
+            f"{a.id} [{a.status.value}] {a.primary_class.value}\n{a.summary['statement']}",
+            args,
+        )
+    return 0
+
+
+def _cmd_interaction_failures(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        ir = _ireg(args, reg)
+        ir.get(args.id)
+        try:
+            doc = ir.artifact(args.id, "failure_modes")
+        except ExperionyxError:
+            doc = {
+                "status": "NOT_AVAILABLE",
+                "reason": "no failure-mode analysis was requested (the spec had no discovery_run_id)",
+            }
+        shown_doc = to_jsonable(doc)
+        _dump(shown_doc if isinstance(shown_doc, dict) else {"data": shown_doc})
+    return 0
+
+
+def _cmd_interaction_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            args.id,
+        )
+        _dump(out)
+        return 0 if out["deterministic"] else 1
+
+
+def _cmd_interaction_export(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        ir = _ireg(args, reg)
+        a = ir.get(args.id)
+        bundle = {
+            "analysis": _record(a),
+            "provenance": ir.provenance(a.id),
+            "effects": [_record(e) for e in ir.effects(a.id)],
+            "evidence": [_record(e) for e in ir.evidence(a.id)],
+            "artifacts": {
+                name: to_jsonable(ir.artifact(a.id, name))
+                for name in (
+                    "spec",
+                    "design_validation",
+                    "trials",
+                    "effects",
+                    "bootstrap",
+                    "summary",
+                )
+            },
+        }
+        text = json.dumps(to_jsonable(bundle), indent=2, sort_keys=True)
+        if args.out:
+            Path(args.out).write_text(text + "\n", encoding="utf-8")
+            print(f"wrote {args.out}")
+        else:
+            print(text)
+    return 0
+
+
+def _cmd_interaction_related(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(
+            {
+                "analysis_id": args.id,
+                "related": [
+                    {
+                        "analysis_id": r.analysis_id,
+                        "relation": r.relation,
+                        "differences": list(r.differences),
+                    }
+                    for r in _ireg(args, reg).related(args.id)
+                ],
+                "note": "pointers for a human; nothing is merged and parameter differences stay visible",
+            }
+        )
+    return 0
+
+
+def _cmd_interaction_reproduce(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        r = check_reproduction(
+            reg, args.id, args.replicate, abs_tol=args.abs_tol, rel_tol=args.rel_tol
+        )
+        _dump(
+            {
+                "original": r.original_id,
+                "replicate": r.replicate_id,
+                "passed": r.passed,
+                "checks": to_jsonable(r.checks),
+            }
+        )
+        return 0 if r.passed else 1
+
+
+def _cmd_interaction_confirm(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(_interaction_row(confirm_by_review(reg, args.id, args.by, args.reason)))
+    return 0
+
+
+def _cmd_interaction_set_status(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(
+            _interaction_row(
+                interaction_change_status(
+                    reg, args.id, InteractionStatus(args.to), args.by, args.reason
+                )
+            )
+        )
+    return 0
+
+
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
     ws = Path(args.workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -1110,6 +1387,89 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_failure_graph)
+
+    ia = group("interaction", "fault interaction analysis (observed contrasts, not causal claims)")
+
+    def fmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument(
+            "--format",
+            choices=["json", "text"],
+            default="json",
+            help="output format (default json)",
+        )
+
+    p = ia.add_parser(
+        "validate", help="check a design; refuses invalid designs and lists every issue"
+    )
+    p.add_argument("spec", help="spec JSON file (cells of run IDs + config)")
+    fmt(p)
+    p.set_defaults(func=_cmd_interaction_validate)
+    p = ia.add_parser("analyze", help="validate, then analyze a design as a real Run")
+    p.add_argument("spec")
+    p.add_argument("--investigation", help="home investigation (default: the control run's)")
+    p.add_argument("--seed", type=int, default=0)
+    fmt(p)
+    p.set_defaults(func=_cmd_interaction_analyze)
+    p = ia.add_parser("list", help="search registered interactions")
+    for flag in (
+        "fault",
+        "metric",
+        "status",
+        "failure-mode",
+        "experiment",
+        "dataset",
+        "model",
+        "investigation",
+    ):
+        p.add_argument(f"--{flag}")
+    p.add_argument("--class", dest="klass", help="primary-metric interaction class")
+    fmt(p)
+    p.set_defaults(func=_cmd_interaction_list)
+    p = ia.add_parser("inspect", help="one interaction with its effects and evidence")
+    p.add_argument("id")
+    p.add_argument(
+        "--full", action="store_true", help="include every effect record and the raw trials"
+    )
+    fmt(p)
+    p.set_defaults(func=_cmd_interaction_inspect)
+    p = ia.add_parser("failures", help="how failure modes are observed across the design's cells")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_interaction_failures)
+    p = ia.add_parser(
+        "replay",
+        help="replay the analysis as a NEW run and compare every result; exit 1 on any difference",
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_interaction_replay)
+    p = ia.add_parser("export", help="a self-contained JSON bundle of an interaction")
+    p.add_argument("id")
+    p.add_argument("--out")
+    p.set_defaults(func=_cmd_interaction_export)
+    p = ia.add_parser("related", help="structurally similar interactions (never merged)")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_interaction_related)
+    p = ia.add_parser(
+        "reproduce", help="check an independent replicate analysis against a SUPPORTED one"
+    )
+    p.add_argument("id")
+    p.add_argument("--replicate", required=True)
+    p.add_argument("--abs-tol", type=float, default=0.0)
+    p.add_argument("--rel-tol", type=float, default=0.5)
+    p.set_defaults(func=_cmd_interaction_reproduce)
+    p = ia.add_parser(
+        "confirm",
+        help="CONFIRMED_BY_REVIEW: an explicit human decision on a REPRODUCIBLE interaction",
+    )
+    p.add_argument("id")
+    p.add_argument("--by", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=_cmd_interaction_confirm)
+    p = ia.add_parser("set-status", help="reject or deprecate")
+    p.add_argument("id")
+    p.add_argument("--to", required=True, choices=["REJECTED", "DEPRECATED"])
+    p.add_argument("--by", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=_cmd_interaction_set_status)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

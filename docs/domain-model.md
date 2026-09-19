@@ -60,6 +60,13 @@ groupings; only a mode has a lifecycle, `DISCOVERED -> CANDIDATE -> SUPPORTED ->
 (plus `REJECTED`/`DEPRECATED`), with validated transitions and retained evidence. See
 [failures.md](failures.md).
 
+## Interaction records (Phase 7)
+
+`InteractionAnalysis` (`ian_`, with a lifecycle `DISCOVERED -> SUPPORTED -> REPRODUCIBLE ->
+CONFIRMED_BY_REVIEW`, plus `REJECTED`/`DEPRECATED`), `InteractionEffect` (`ief_`) and
+`InteractionEvidence` (`iev_`) are immutable and content-addressed; only the analysis status is
+mutable. See [interactions.md](interactions.md).
+
 ## Observation kinds
 `Observation.epistemic_kind` is `OBSERVATION` or `DERIVED_METRIC` (never interpretation or
 hypothesis), following [methodology.md](methodology.md).

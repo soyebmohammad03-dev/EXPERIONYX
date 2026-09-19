@@ -234,10 +234,11 @@ def test_phase5_database_migrates_to_failure_tables_and_keeps_everything(tmp_pat
             "failure_evidence",
             "failure_relationships",
         } <= tables
+        assert {"interaction_analyses", "interaction_effects", "interaction_evidence"} <= tables
     assert (tmp_path / "v4.sqlite.v4.bak").is_file()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_records(
     tmp_path: Path, version: int
 ) -> None:
@@ -255,7 +256,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 5
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 6
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",

@@ -297,5 +297,8 @@ def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
         "failure_modes",
         "failure_evidence",
         "failure_relationships",
+        "interaction_analyses",
+        "interaction_effects",
+        "interaction_evidence",
     } <= tables
     assert any(x.startswith("CREATE TABLE provenance") for x in _ddl())
