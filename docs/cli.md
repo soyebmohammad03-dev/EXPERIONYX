@@ -55,6 +55,10 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx reliability list\|inspect\|evidence <rpf_…>` | search profiles; dimension statuses and observations; source references, provenance and artifacts |
 | `experionyx reliability compare <rpf_…> <rpf_…>` | raw per-dimension differences between two compatible profiles (no winner) |
 | `experionyx reliability replay <rpf_…>` | replay the profile as a new run and compare; exit 1 unless verified deterministic |
+| `experionyx benchmark validate\|run SPEC.json [--format text]` | expand and validate a benchmark protocol (refused with every issue listed, before any run exists), or execute it and collect coverage and results (exit 0 complete, 3 incomplete coverage, 2 refused) |
+| `experionyx benchmark list\|inspect\|coverage <bmk_…\|brs_…>` | search definitions; a definition or result with its section statuses; the coverage account |
+| `experionyx benchmark compare <brs_…> <brs_…>` | raw differences between two results of an identical protocol (refused otherwise; no winner) |
+| `experionyx benchmark replay <brs_…>` | replay the collect run as a new run and compare; exit 1 unless verified deterministic |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`

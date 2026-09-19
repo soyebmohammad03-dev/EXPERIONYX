@@ -16,6 +16,12 @@ from experionyx.adapters.capabilities import DeviceKind, TaskType
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.adapters.registry import default_registries
 from experionyx.artifacts import LocalArtifactStore
+from experionyx.benchmark.engine import replay_check as benchmark_replay_check
+from experionyx.benchmark.engine import run_benchmark
+from experionyx.benchmark.entities import Benchmark, BenchmarkResult
+from experionyx.benchmark.protocol import validation_report as benchmark_validation
+from experionyx.benchmark.registry import BenchmarkRegistry
+from experionyx.benchmark.spec import BenchmarkSpec
 from experionyx.demos import DEMOS, run_demo
 from experionyx.domain import (
     Artifact,
@@ -29,7 +35,13 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
-from experionyx.errors import ArtifactIntegrityError, DesignRefusal, ExperionyxError, ProfileRefusal
+from experionyx.errors import (
+    ArtifactIntegrityError,
+    BenchmarkRefusal,
+    DesignRefusal,
+    ExperionyxError,
+    ProfileRefusal,
+)
 from experionyx.evaluation.compare import compare_evaluations
 from experionyx.evaluation.config import (
     EvaluationConfig,
@@ -1293,6 +1305,222 @@ def _cmd_reliability_replay(args: argparse.Namespace) -> int:
         return 0 if out["deterministic"] else 1
 
 
+# -- robustness benchmarks --------------------------------------------------------------------------------
+
+
+def _load_benchmark_spec(path: str) -> BenchmarkSpec:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read benchmark spec {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("a benchmark spec file must be a JSON object")
+    return BenchmarkSpec.from_dict(data)
+
+
+def _breg(args: argparse.Namespace, reg: SqliteRegistry) -> BenchmarkRegistry:
+    return BenchmarkRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _bench_row(b: Benchmark) -> dict[str, object]:
+    return {
+        "id": b.id,
+        "name": b.name,
+        "version": b.version,
+        "spec_id": b.spec_id,
+        "protocol_hash": b.protocol_hash,
+        "engine_version": b.engine_version,
+        "model": b.model_record_id,
+        "dataset": b.dataset_record_id,
+    }
+
+
+def _result_row(r: BenchmarkResult) -> dict[str, object]:
+    return {
+        "id": r.id,
+        "benchmark_id": r.benchmark_id,
+        "coverage_status": r.coverage_status.value,
+        "section_status": to_jsonable(r.section_status),
+        "counts": to_jsonable(r.summary["counts"]),
+        "run_id": r.run_id,
+    }
+
+
+def _coverage_text(cov: dict[str, Any], rid: str) -> str:
+    t, ff = cov["trials"], cov["fault_families"]
+    lines = [
+        f"{rid}: coverage {'COMPLETE' if cov['complete'] else 'INCOMPLETE'} (this counts what was executed; it is not a robustness measure)",
+        f"  fault families: tested {ff['tested']} / requested {ff['requested']}",
+        f"  trials: {t['completed']} completed, {t['failed']} failed, {t['skipped']} skipped, {t['not_run']} not run of {t['requested']}",
+        f"  parameter points: {cov['parameter_points']}",
+        f"  interactions: {cov['interactions']['analyzed']}/{cov['interactions']['requested']} analyzed",
+        f"  failure modes: discovery {cov['failure_modes']['discovery']}, {cov['failure_modes']['discovered']} discovered",
+    ]
+    lines += [f"  ! {r}" for r in cov["incomplete_reasons"]]
+    return "\n".join(lines)
+
+
+def _cmd_benchmark_validate(args: argparse.Namespace) -> int:
+    spec = _load_benchmark_spec(args.spec)
+    with _open(args.workspace) as reg:
+        report = benchmark_validation(reg, spec, default_fault_registry())
+    issues: Any = report.get("issues", [])
+    lines = [f"spec {report['spec_id']}: {'VALID' if report['valid'] else 'REFUSED'}"]
+    lines += [
+        f"  - {i['code']}: required {i['required']}; found {i['found']}; {i['why']}" for i in issues
+    ]
+    if report["valid"]:
+        lines += [
+            f"  {report['units']} experiment unit(s): {report['units_by_kind']}",
+            *[f"  ! {w}" for w in report["warnings"]],
+        ]
+    _emit(report, "\n".join(lines), args)
+    return 0 if report["valid"] else 1
+
+
+def _cmd_benchmark_run(args: argparse.Namespace) -> int:
+    spec = _load_benchmark_spec(args.spec)
+    with _open(args.workspace) as reg:
+        try:
+            res = run_benchmark(
+                reg,
+                LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                _executor(reg, args.workspace),
+                spec,
+                source_root=Path.cwd(),
+            )
+        except BenchmarkRefusal as exc:  # refused BEFORE any run is created
+            print(
+                "error: benchmark refused; nothing was executed and nothing was recorded",
+                file=sys.stderr,
+            )
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        doc: dict[str, object] = {
+            "benchmark_id": res.benchmark_id,
+            "result_id": res.result_id,
+            "collect_run": res.run_id,
+            "status": res.status.value if res.status else None,
+            "already_run": res.already_run,
+            "errors": dict(res.errors),
+        }
+        text = f"benchmark {res.benchmark_id or '?'}: {'already executed in this registry' if res.already_run else (res.status.value if res.status else 'not collected')}"
+        code = 1
+        if res.result_id:
+            br = _breg(args, reg)
+            row = _result_row(br.result(res.result_id))
+            doc["result"] = row
+            cov = br.document(res.result_id, "coverage")
+            text = _coverage_text(cov, res.result_id)
+            code = 0 if cov["complete"] else 3  # 3: the protocol ran but the coverage is incomplete
+        _emit(doc, text, args)
+        return code
+
+
+def _cmd_benchmark_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        found = _breg(args, reg).search(
+            name=args.name,
+            version=args.version,
+            model=args.model,
+            dataset=args.dataset,
+            protocol=args.protocol,
+            engine=args.engine,
+            fault=args.fault,
+            coverage=args.coverage,
+        )
+        _emit(
+            {
+                "benchmarks": [_bench_row(b) for b in found],
+                "note": "benchmarks are evidence protocols; they are not ranked",
+            },
+            "\n".join(
+                f"{b.id} {b.name} {b.version} protocol={b.protocol_hash[7:19]}" for b in found
+            ),
+            args,
+        )
+    return 0
+
+
+def _cmd_benchmark_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        br = _breg(args, reg)
+        if args.id.startswith("bmk_"):
+            b = br.get(args.id)
+            doc: dict[str, object] = {
+                **_bench_row(b),
+                "spec": to_jsonable(b.spec),
+                "results": [_result_row(r) for r in br.results(b.id)],
+            }
+            _emit(
+                doc,
+                f"{b.id} {b.name} {b.version}: {len(br.results(b.id))} result(s), protocol {b.protocol_hash[7:19]}",
+                args,
+            )
+        else:
+            r = br.result(args.id)
+            summ = br.document(r.id, "summary")
+            out: dict[str, object] = {
+                **_result_row(r),
+                "summary": summ,
+                "provenance": to_jsonable(br.provenance(r.id)),
+                "artifacts": [{"path": a.path, "id": a.id} for a in br.artifacts(r.id)],
+            }
+            if args.full:
+                out["documents"] = br.bundle(r.id)
+            text = [
+                f"{r.id} coverage {r.coverage_status.value}",
+                "sections (no overall score):",
+                *[f"  {k:20} {v}" for k, v in summ["section_status"].items()],
+                "observations (INTERPRETED, deterministic templates):",
+                *[f"  - {x['text']}" for x in summ["interpreted"]["statements"]],
+            ]
+            _emit(out, "\n".join(text), args)
+    return 0
+
+
+def _cmd_benchmark_coverage(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        br = _breg(args, reg)
+        r = br.resolve_result(args.id)
+        cov = br.document(r.id, "coverage")
+        _emit({"result_id": r.id, "coverage": cov}, _coverage_text(cov, r.id), args)
+        return 0 if cov["complete"] else 3
+
+
+def _cmd_benchmark_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        try:
+            out = _breg(args, reg).compare(args.a, args.b)
+        except BenchmarkRefusal as exc:
+            print("error: results are not comparable; nothing was compared", file=sys.stderr)
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        shown: Any = to_jsonable(out)
+        _emit(
+            shown,
+            f"compared {args.a} with {args.b} under protocol {out['protocol_hash'][7:19]} (raw differences b - a; no winner)\n"
+            + "\n".join(f"  {k}: {v['a']} -> {v['b']}" for k, v in out["section_status"].items()),
+            args,
+        )
+    return 0
+
+
+def _cmd_benchmark_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        r = _breg(args, reg).resolve_result(args.id)
+        out = benchmark_replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            r.id,
+        )
+        _dump(out)
+        return 0 if out["deterministic"] is True else 1
+
+
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
     ws = Path(args.workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -1717,6 +1945,58 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_reliability_replay)
+
+    bm = group("benchmark", "standardized robustness benchmarks (coverage and evidence; no score)")
+
+    def bfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument(
+            "--format",
+            choices=["json", "text"],
+            default="json",
+            help="output format (default json)",
+        )
+
+    p = bm.add_parser(
+        "validate",
+        help="expand and check a benchmark spec; refuses invalid definitions with every issue listed",
+    )
+    p.add_argument("spec", help="benchmark spec JSON file")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_validate)
+    p = bm.add_parser(
+        "run",
+        help="execute a benchmark protocol and collect its coverage and results (exit 3 if coverage is incomplete)",
+    )
+    p.add_argument("spec")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_run)
+    p = bm.add_parser("list", help="search registered benchmark definitions")
+    for flag in ("name", "version", "model", "dataset", "protocol", "engine", "fault", "coverage"):
+        p.add_argument(f"--{flag}")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_list)
+    p = bm.add_parser("inspect", help="a benchmark definition (bmk_) or a result (brs_)")
+    p.add_argument("id")
+    p.add_argument("--full", action="store_true", help="include every result document")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_inspect)
+    p = bm.add_parser("coverage", help="the coverage account of a result (exit 3 if incomplete)")
+    p.add_argument("id")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_coverage)
+    p = bm.add_parser(
+        "compare", help="raw differences between two results of the SAME protocol (no winner)"
+    )
+    p.add_argument("a")
+    p.add_argument("b")
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_compare)
+    p = bm.add_parser(
+        "replay",
+        help="replay the collect run as a NEW run and compare; exit 1 unless verified deterministic",
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_benchmark_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

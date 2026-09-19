@@ -15,6 +15,7 @@ from types import TracebackType
 from typing import Self
 
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
+from experionyx.benchmark.entities import Benchmark, BenchmarkResult, BenchmarkUnit
 from experionyx.domain import (
     EVIDENCE_TARGET_TYPES,
     Artifact,
@@ -58,8 +59,8 @@ from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
 
 # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
-# 6: interactions. 7: reliability profiles.
-DB_SCHEMA_VERSION = 7
+# 6: interactions. 7: reliability profiles. 8: benchmarks.
+DB_SCHEMA_VERSION = 8
 
 
 @dataclass(frozen=True)
@@ -221,6 +222,25 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("dimension", "ref_kind", "ref_id"),
         since=7,
     ),
+    Benchmark: _Spec(
+        "benchmarks",
+        refs=(("model_record_id", RegisteredModel), ("dataset_record_id", RegisteredDataset)),
+        plain=("name", "version", "spec_id", "protocol_hash", "engine_version"),
+        since=8,
+    ),
+    BenchmarkResult: _Spec(
+        "benchmark_results",
+        refs=(("benchmark_id", Benchmark), ("investigation_id", Investigation), ("run_id", Run)),
+        plain=("protocol_hash", "provenance_fingerprint", "coverage_status"),
+        since=8,
+    ),
+    BenchmarkUnit: _Spec(
+        "benchmark_units",
+        refs=(("result_id", BenchmarkResult), ("run_id", Run)),
+        plain=("unit_key", "unit_kind", "unit_status", "grid"),
+        optional=("run_id",),
+        since=8,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -327,6 +347,12 @@ def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_7_to_8(conn: sqlite3.Connection) -> None:
+    """Phase 9: benchmark definitions, results and units (new tables only)."""
+    for statement in _ddl(upto=8, since=8):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -334,6 +360,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
     6: _migrate_6_to_7,
+    7: _migrate_7_to_8,
 }
 
 
@@ -458,6 +485,8 @@ class SqliteRegistry:
                 self._check_interaction_analysis(entity)
             elif isinstance(entity, ReliabilityProfile):
                 self._check_reliability_profile(entity)
+            elif isinstance(entity, BenchmarkResult):
+                self._check_benchmark_result(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -471,6 +500,13 @@ class SqliteRegistry:
                 f"VALUES ({', '.join('?' * len(cols))})",
                 values,
             )
+
+    def _check_benchmark_result(self, r: BenchmarkResult) -> None:
+        run = self.get(Run, r.run_id)
+        if self.get(Experiment, run.experiment_id).investigation_id != r.investigation_id:
+            raise ValidationError("benchmark result run belongs to a different investigation")
+        if self.get(Benchmark, r.benchmark_id).protocol_hash != r.protocol_hash:
+            raise ValidationError("benchmark result protocol hash differs from its benchmark")
 
     def _check_reliability_profile(self, p: ReliabilityProfile) -> None:
         run = self.get(Run, p.run_id)

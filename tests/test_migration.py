@@ -240,11 +240,14 @@ def test_phase5_database_migrates_to_failure_tables_and_keeps_everything(tmp_pat
             "interaction_evidence",
             "reliability_profiles",
             "reliability_references",
+            "benchmarks",
+            "benchmark_results",
+            "benchmark_units",
         } <= tables
     assert (tmp_path / "v4.sqlite.v4.bak").is_file()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7])
 def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_records(
     tmp_path: Path, version: int
 ) -> None:
@@ -262,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 7
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 8
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -289,3 +292,36 @@ def test_failure_migration_is_atomic_when_a_step_fails(tmp_path: Path) -> None:
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 4  # still the old version
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "failure_signals" not in tables  # nothing half-applied
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7])
+def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
+    tmp_path: Path, version: int
+) -> None:
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 8
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
+        assert (
+            raw.execute("SELECT COUNT(*) FROM benchmark_results").fetchone()[0] == 0
+        )  # new tables start empty
+    assert (
+        tmp_path / f"v{version}.sqlite.v{version}.bak"
+    ).is_file()  # a backup is kept per migration
+
+
+def test_benchmark_migration_is_atomic_when_a_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v7.sqlite"
+    make_database(path, 7)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE benchmark_units (x INTEGER)")  # collides with the migration's DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 7  # still the old version
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "benchmarks" not in tables  # nothing half-applied

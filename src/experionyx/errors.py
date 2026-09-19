@@ -156,3 +156,15 @@ class ProfileRefusal(ReliabilityError):
     def __init__(self, issues: "tuple[object, ...]") -> None:
         self.issues = issues
         super().__init__("reliability profile refused: " + "; ".join(str(i) for i in issues))
+
+
+class BenchmarkError(ExperionyxError):
+    """Base class for robustness-benchmark problems."""
+
+
+class BenchmarkRefusal(BenchmarkError):
+    """The benchmark definition is invalid or unsupported; nothing was executed or recorded."""
+
+    def __init__(self, issues: "tuple[object, ...]") -> None:
+        self.issues = issues
+        super().__init__("benchmark refused: " + "; ".join(str(i) for i in issues))

@@ -33,6 +33,10 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     interpreted, with sources, statuses and unresolved issues, and never a score, ranking or verdict
     ([reliability.md](reliability.md)).
 
+12. **A benchmark reports its coverage.** A benchmark is a versioned protocol whose result lists what was
+    and was not executed. Missing coverage is never robustness, results are comparable only under an
+    identical protocol, and no score, ranking or verdict is computed ([benchmarks.md](benchmarks.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

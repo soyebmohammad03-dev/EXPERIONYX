@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Benchmark records (Phase 9)
+
+`Benchmark` (`bmk_`, the versioned definition), `BenchmarkResult` (`brs_`, one execution's coverage and
+section statuses) and `BenchmarkUnit` (`bun_`, each expanded experiment unit with its status and run) are
+immutable and content-addressed. See [benchmarks.md](benchmarks.md).
+
 ## Observation kinds
 `Observation.epistemic_kind` is `OBSERVATION` or `DERIVED_METRIC` (never interpretation or
 hypothesis), following [methodology.md](methodology.md).
