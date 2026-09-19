@@ -25,6 +25,7 @@ from experionyx.provenance import Provenance
 from experionyx.registry import Registry
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.taxonomy import DimensionStatus
+from experionyx.slices.entities import SliceAnalysis
 
 NO_SCORE = "no overall score, ranking or verdict is computed; coverage counts what was executed and is not a measure of robustness"
 NEVER_CLAIMED = [
@@ -54,6 +55,7 @@ class Executed:
     discovery_run: str | None
     interaction_analyses: Mapping[str, str]  # pair -> interaction analysis ID
     profile_id: str | None
+    slice_analysis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +67,7 @@ class Executed:
             "discovery_run": self.discovery_run,
             "interaction_analyses": dict(self.interaction_analyses),
             "profile_id": self.profile_id,
+            **({"slice_analysis": self.slice_analysis} if self.slice_analysis else {}),
         }
 
     @classmethod
@@ -78,6 +81,7 @@ class Executed:
             d.get("discovery_run"),
             dict(d["interaction_analyses"]),
             d.get("profile_id"),
+            d.get("slice_analysis"),
         )
 
 
@@ -470,6 +474,22 @@ def collect(
             "source": {"kind": "RELIABILITY_PROFILE", "id": pr.id},
         }
 
+    # -- slice analysis (only when the benchmark explicitly requested one) --------------------------------------------------------------------
+    slice_block: dict[str, Any] = {"status": DimensionStatus.UNAVAILABLE.value, "reason": "no slice analysis was requested by this benchmark"}  # fmt: skip
+    slice_fp: str | None = None
+    if spec.slices:
+        slice_block = {"status": DimensionStatus.UNAVAILABLE.value, "requested": [s.name for s in spec.slices], "reason": ex.errors.get("slices", "the slice analysis did not run")}  # fmt: skip
+        if ex.slice_analysis:
+            sa = registry.get(SliceAnalysis, ex.slice_analysis)
+            slice_fp = sa.provenance_fingerprint
+            slice_block = {"status": DimensionStatus.DERIVED.value, "requested": [s.name for s in spec.slices], "analysis_id": sa.id, "analysis_status": sa.analysis_status, "slices": to_jsonable(sa.summary.get("slices")), "fault_status_counts": to_jsonable(sa.summary.get("fault_status_counts")), "failure_mode_status_counts": to_jsonable(sa.summary.get("failure_mode_status_counts")), "interaction_status_counts": to_jsonable(sa.summary.get("interaction_status_counts")), "source": {"kind": "SLICE_ANALYSIS", "id": sa.id}}  # fmt: skip
+            if sa.analysis_status != "COMPLETE":
+                reasons.append(
+                    "the slice analysis has insufficient or unavailable evidence for some requested slice or source"
+                )
+        else:
+            reasons.append("the requested slice analysis did not run")
+
     # -- coverage ---------------------------------------------------------------------------------------------------------------------------------
     trials = {s.value: sum(u["status"] == s.value for u in fault_units) for s in UnitStatus}
     pts_total = sum(f.get("points_requested", 0) for f in fam.values())
@@ -517,7 +537,7 @@ def collect(
         "parameter_points": {"requested": pts_total, "with_any_completed": sum(f.get("points_with_any_completed", 0) for f in fam.values()), "fully_completed": sum(f.get("points_fully_completed", 0) for f in fam.values())},
         "trials": {"requested": len(fault_units), "completed": trials["COMPLETED"], "failed": trials["FAILED"], "skipped": trials["SKIPPED"], "not_run": trials["NOT_RUN"]},
         "seeds": {"requested": list(spec.seeds), "distinct_seeds_with_a_completed_trial": sorted({u["seed"] for u in fault_units if u["status"] == "COMPLETED"})},
-        "metrics": metrics_cov, "slices": slices_cov, "interactions": inter_cov,
+        "metrics": metrics_cov, "slices": {**slices_cov, **({"slice_analysis": {"requested": slice_block.get("requested"), "status": slice_block["status"], "analysis_status": slice_block.get("analysis_status")}} if spec.slices else {})}, "interactions": inter_cov,
         "failure_modes": {"discovery": "DISABLED" if not spec.discovery else "RAN" if ex.discovery_run else "DID_NOT_RUN", "discovered": len(modes), "by_lifecycle_state": _count(m["lifecycle_state"] for m in modes), "unavailable_reason": fm_reason},
         "failed_or_undefined": failed, "unsupported_combinations": list(protocol.unsupported),
         "complete": complete, "incomplete_reasons": reasons, "note": NO_SCORE,
@@ -543,6 +563,7 @@ def collect(
         "baseline": baseline["status"], "fault_responses": DimensionStatus.OBSERVED.value if ok_resp else DimensionStatus.INSUFFICIENT_EVIDENCE.value if responses else DimensionStatus.UNAVAILABLE.value,
         "interactions": DimensionStatus.UNAVAILABLE.value if not inter else DimensionStatus.DERIVED.value if any(r["status"] == "DERIVED" for r in inter) else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "failure_modes": fm_status, "reliability_profile": profile["status"],
+        **({"slice_analysis": slice_block["status"]} if spec.slices else {}),
         "uncertainty": DimensionStatus.DERIVED.value if intervals else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "reproducibility": DimensionStatus.DERIVED.value if responses else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
     }  # fmt: skip
@@ -551,6 +572,7 @@ def collect(
         "interactions": {"status": section["interactions"], "pairs": inter},
         "failure_modes": {"status": fm_status, "reason": fm_reason, "modes": modes, "discovery_run": ex.discovery_run},
         "reliability_profile": profile,
+        **({"slice_analysis": slice_block} if spec.slices else {}),
         "uncertainty": {"status": section["uncertainty"], "intervals_available": intervals, "caveats": ["intervals are descriptive spreads under each analysis's own method and are not comparable across methods", *sorted({w for r in inter for w in ((r.get("bootstrap") or {}).get("warnings") or [])})]},
         "reproducibility": {"status": section["reproducibility"], "trials_per_family": {k: {"requested": f.get("trials_requested"), "completed": f.get("completed")} for k, f in fam.items() if "trials_requested" in f}, "distinct_seeds": len(spec.seeds), "interactions_by_lifecycle_state": _count(r.get("lifecycle_state") for r in inter if r.get("lifecycle_state")), "unresolved": list(reasons), "replay": "the collect Run can be replayed (`benchmark replay`); re-executing the whole protocol in another registry is the reproduction test"},
     }  # fmt: skip
@@ -569,6 +591,7 @@ def collect(
             },
             "modes": mode_hashes,
             "profile": prof_fp,
+            **({"slice_analysis": slice_fp} if spec.slices else {}),
         }
     )
     summary = {

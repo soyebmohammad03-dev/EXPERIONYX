@@ -13,10 +13,11 @@
 8. Reliability Profiles (done)
 9. Robustness Benchmark Engine (done)
 10. Statistical Analysis & Evidence Engine (done; BCa for interaction contrasts and control-variability modelling remain open)
-11. Drift Laboratory
-12. Evidence Graph
-13. Reliability Analysis (statistical, building on profiles and benchmarks)
-14. Experiment Planner
-15. Research validation
-16. Advanced UI/API
-17. Public release / reproducibility package
+11. Slice & Subgroup Analysis Engine (done)
+12. Drift Laboratory
+13. Evidence Graph
+14. Reliability Analysis (statistical, building on profiles and benchmarks)
+15. Experiment Planner
+16. Research validation
+17. Advanced UI/API
+18. Public release / reproducibility package

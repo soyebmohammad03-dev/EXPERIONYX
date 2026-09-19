@@ -48,6 +48,7 @@ from experionyx.registry import Registry
 from experionyx.reliability.engine import run_profile
 from experionyx.reliability.spec import ProfileSpec
 from experionyx.reliability.taxonomy import Scope
+from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
 
 PROCEDURE = "experionyx.benchmark.engine:run_benchmark_collect"
 ARTIFACTS = ("spec", "units", "coverage", "results", "summary")
@@ -224,6 +225,18 @@ def run_benchmark(
         except (ExperionyxError, ValueError) as exc:
             errors[f"interaction:{p.name}"] = f"{type(exc).__name__}: {exc}"
         del gx
+    slice_analysis_id: str | None = None
+    if spec.slices:
+        try:
+            so = run_slice_analysis_request(
+                registry, store, executor, inv,
+                SliceAnalysisSpec(baseline, spec.slices, (), tuple(fault_fx.values()), tuple(mode_ids), tuple(analyses.values()), spec.slice_config),
+            )  # fmt: skip
+            slice_analysis_id = so.analysis_id
+            if slice_analysis_id is None:
+                errors["slices"] = f"the slice analysis run ended {so.status.value}"
+        except (ExperionyxError, ValueError) as exc:
+            errors["slices"] = f"{type(exc).__name__}: {exc}"
     profile_id: str | None = None
     if spec.profile:
         try:
@@ -238,6 +251,7 @@ def run_benchmark(
                     tuple(fault_fx.values()),
                     tuple(analyses.values()),
                     tuple(mode_ids),
+                    (slice_analysis_id,) if slice_analysis_id else (),
                 ),
             )
             profile_id = pr.profile_id
@@ -245,7 +259,17 @@ def run_benchmark(
                 errors["profile"] = f"the profile run ended {pr.status.value}"
         except ExperionyxError as exc:
             errors["profile"] = f"{type(exc).__name__}: {exc}"
-    ex = col.Executed(inv, baseline, fault_fx, cell_fx, errors, discovery_run, analyses, profile_id)
+    ex = col.Executed(
+        inv,
+        baseline,
+        fault_fx,
+        cell_fx,
+        errors,
+        discovery_run,
+        analyses,
+        profile_id,
+        slice_analysis_id,
+    )
     conf = ConfigurationRef(
         {
             "benchmark_collect": {

@@ -91,6 +91,12 @@ from experionyx.reliability.engine import run_profile
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.registry import ReliabilityProfileRegistry
 from experionyx.reliability.spec import ProfileSpec
+from experionyx.slices import analysis as slice_an
+from experionyx.slices.data import dataset_for_run, load_baseline
+from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
+from experionyx.slices.entities import Slice, SliceAnalysis
+from experionyx.slices.registry import SliceRegistry
+from experionyx.slices.spec import SliceSpec
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 from experionyx.stats import store as stats_store
 from experionyx.stats.entities import StatisticalAnalysis
@@ -1714,6 +1720,227 @@ def _cmd_stats_verify(args: argparse.Namespace) -> int:
     return 0 if out["reproduced"] else 1
 
 
+# -- slices -------------------------------------------------------------------------------------------------
+
+
+def _slice_specs(path: str) -> list[SliceSpec]:
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    items = doc["slices"] if isinstance(doc, dict) and "slices" in doc else [doc]
+    return [SliceSpec.from_dict(x) for x in items]
+
+
+def _sreg(args: argparse.Namespace, reg: SqliteRegistry) -> SliceRegistry:
+    return SliceRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _slice_row(s: Slice) -> dict[str, object]:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "description": s.description,
+        "fields": list(s.fields),
+        "static": s.spec().static,
+    }
+
+
+def _summary_slices(a: SliceAnalysis) -> dict[str, Any]:
+    x = a.summary.get("slices")
+    return dict(x) if isinstance(x, Mapping) else {}
+
+
+def _analysis_row(a: SliceAnalysis) -> dict[str, object]:
+    return {"id": a.id, "status": a.analysis_status, "baseline_run_id": a.baseline_run_id, "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id, "slices": sorted(_summary_slices(a))}  # fmt: skip
+
+
+def _cmd_slice_validate(args: argparse.Namespace) -> int:
+    doc = json.loads(Path(args.spec).read_text(encoding="utf-8"))
+    if isinstance(doc, dict) and "baseline_run" in doc:
+        spec = SliceAnalysisSpec.from_dict(doc)
+        out: dict[str, object] = {"valid": True, "kind": "analysis", "spec_id": spec.spec_id, "slices": [{"name": s.name, "slice_id": s.slice_id, "description": s.human, "static": s.static} for s in spec.slices]}  # fmt: skip
+    else:
+        out = {"valid": True, "kind": "slices", "slices": [{"name": s.name, "slice_id": s.slice_id, "description": s.human, "fields": list(s.fields), "static": s.static} for s in _slice_specs(args.spec)]}  # fmt: skip
+    _emit(out, "VALID: " + ", ".join(f"{s['name']} = {s['slice_id']}" for s in out["slices"]), args)  # type: ignore[attr-defined]
+    return 0
+
+
+def _cmd_slice_register(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sr = _sreg(args, reg)
+        rows = []
+        for spec in _slice_specs(args.spec):
+            s, created = sr.register(spec)
+            rows.append({**_slice_row(s), "created": created})
+    _emit(
+        {"slices": rows},
+        "\n".join(
+            f"{r['id']} {r['name']} {'created' if r['created'] else 'already registered'}"
+            for r in rows
+        ),
+        args,
+    )
+    return 0
+
+
+def _cmd_slice_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sr = _sreg(args, reg)
+        static = None if args.static is None else args.static == "yes"
+        rows = [
+            _slice_row(s)
+            for s in sr.search(name=args.name, field=args.field, text=args.text, static=static)
+        ]
+        analyses = (
+            [
+                _analysis_row(a)
+                for a in sr.analyses(
+                    **({"baseline_run_id": args.baseline_run} if args.baseline_run else {})
+                )
+            ]
+            if args.analyses
+            else []
+        )
+    _emit(
+        {"slices": rows, **({"analyses": analyses} if args.analyses else {})},
+        "\n".join(f"{r['id']} {r['name']}: {r['description']}" for r in rows),
+        args,
+    )
+    return 0
+
+
+def _cmd_slice_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sr = _sreg(args, reg)
+        if args.id.startswith("sls_"):
+            s = sr.get(args.id)
+            doc: dict[str, object] = {
+                **_slice_row(s),
+                "condition": to_jsonable(s.condition),
+                "slice_schema": s.slice_schema,
+                "used_by": [
+                    a.id
+                    for a in sr.analyses()
+                    if args.id in {x["slice_id"] for x in _summary_slices(a).values()}
+                ],
+            }
+        else:
+            a = sr.analysis(args.id)
+            doc = {
+                **_analysis_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": sr.provenance(a.id),
+                "artifacts": [{"path": x.path, "id": x.id} for x in sr.artifacts(a.id)],
+            }
+            if args.full:
+                doc["documents"] = {
+                    n: sr.document(a.id, n) for n in ("spec", "membership", "results", "summary")
+                }
+    _emit(doc, f"{args.id}: {doc.get('description') or doc.get('status')}", args)
+    return 0
+
+
+def _slice_dataset(
+    args: argparse.Namespace, reg: SqliteRegistry, run_id: str, specs: Sequence[SliceSpec]
+) -> object:
+    """The baseline's dataset, loaded only if some slice reads a feature."""
+    if not any(f.startswith("feature:") for s in specs for f in s.fields):
+        return None
+    return dataset_for_run(reg, default_registries(entry_points=True), Path(args.workspace), run_id)
+
+
+def _cmd_slice_evaluate(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sr = _sreg(args, reg)
+        specs = _slice_specs(args.spec)
+        ds = _slice_dataset(args, reg, args.baseline_run, specs)
+        out = []
+        for spec in specs:
+            m = sr.evaluate(spec, args.baseline_run, ds)  # type: ignore[arg-type]
+            row = to_jsonable(m)
+            assert isinstance(row, dict)  # noqa: S101
+            if not args.ids:
+                row["sample_ids"] = f"{m.n_members} member IDs omitted (use --ids)"
+            out.append(row)
+    _emit(
+        {"memberships": out},
+        "\n".join(
+            f"{r['name']}: {r['status']}, {r['n_members']}/{r['n_total']} samples, {r['n_unknown']} unknown"
+            for r in out
+        ),
+        args,
+    )
+    return 0
+
+
+def _cmd_slice_analyze(args: argparse.Namespace) -> int:
+    spec = SliceAnalysisSpec.from_dict(json.loads(Path(args.spec).read_text(encoding="utf-8")))
+    with _open(args.workspace) as reg:
+        run = reg.get(Run, spec.baseline_run)
+        inv = reg.get(Experiment, run.experiment_id).investigation_id
+        out = run_slice_analysis_request(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR).__class__(
+                Path(args.workspace) / EXPERIMENTS_DIR
+            ),
+            _executor(reg, args.workspace),
+            inv,
+            spec,
+        )
+        a = reg.get(SliceAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
+
+
+def _cmd_slice_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        sr = SliceRegistry(reg, store)
+        base = load_baseline(reg, store, args.baseline_run)
+        (a_spec,) = _slice_specs(args.a)
+        b_specs = [] if args.b in ("POPULATION", "REST") else _slice_specs(args.b)
+        ds = _slice_dataset(args, reg, args.baseline_run, [a_spec, *b_specs])
+        cfg = slice_an.SliceConfig(
+            **{
+                k: v
+                for k, v in (
+                    ("confidence", args.confidence),
+                    ("resamples", args.resamples),
+                    ("seed", args.seed),
+                    ("method", args.method),
+                    ("min_members", args.min_members),
+                )
+                if v is not None
+            }
+        )
+        a = sr.evaluate(a_spec, args.baseline_run, ds)  # type: ignore[arg-type]
+        if args.b in ("POPULATION", "REST"):
+            b_name, b_ids = args.b, None
+        else:
+            (b_spec,) = _slice_specs(args.b)
+            b = sr.evaluate(b_spec, args.baseline_run, ds)  # type: ignore[arg-type]
+            b_name, b_ids = b_spec.name, list(b.sample_ids)
+    if a.n_members == 0:
+        raise ExperionyxError(
+            f"slice {a_spec.name} has no members ({a.status.value}); nothing to compare"
+        )
+    if args.b == "POPULATION":
+        res = slice_an.compare_to_population(base, a.sample_ids, cfg)
+    else:
+        other = (
+            b_ids
+            if b_ids is not None
+            else [i for i in sorted(base.rows) if i not in set(a.sample_ids)]
+        )
+        res = slice_an.compare_groups(base, a.sample_ids, other, cfg)
+    doc = {
+        "a": {"name": a_spec.name, "slice_id": a_spec.slice_id, "n_members": a.n_members},
+        "b": b_name,
+        "comparison": to_jsonable(res),
+    }
+    _emit(doc, f"{a_spec.name} vs {b_name}: {res.get('status')}", args)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -2235,6 +2462,78 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     sfmt(p)
     p.set_defaults(func=_cmd_stats_verify)
+
+    sl = group(
+        "slice",
+        "slice and subgroup analysis (per-population evidence; no ranking, no fairness score)",
+    )
+
+    def slfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    p = sl.add_parser(
+        "validate",
+        help="parse and normalize slice definitions or an analysis spec; prints their identities",
+    )
+    p.add_argument("spec")
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_validate)
+    p = sl.add_parser(
+        "register", help="register slice definitions (equivalent definitions are one record)"
+    )
+    p.add_argument("spec")
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_register)
+    p = sl.add_parser("list", help="search registered slices (and optionally analyses)")
+    p.add_argument("--name")
+    p.add_argument("--field")
+    p.add_argument("--text")
+    p.add_argument(
+        "--static", choices=["yes", "no"], help="yes: membership does not depend on model output"
+    )
+    p.add_argument("--analyses", action="store_true")
+    p.add_argument("--baseline-run")
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_list)
+    p = sl.add_parser("inspect", help="a slice (sls_) or a slice analysis (san_) with provenance")
+    p.add_argument("id")
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="include the spec, membership, results and summary documents",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_inspect)
+    p = sl.add_parser(
+        "evaluate",
+        help="membership of slice definitions over a baseline run's samples (nothing is stored)",
+    )
+    p.add_argument("spec")
+    p.add_argument("--baseline-run", required=True)
+    p.add_argument("--ids", action="store_true", help="list member sample IDs")
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_evaluate)
+    p = sl.add_parser(
+        "analyze",
+        help="run a slice analysis as a new run (exit 3 if some evidence is insufficient or unavailable)",
+    )
+    p.add_argument("spec")
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_analyze)
+    p = sl.add_parser(
+        "compare",
+        help="one slice vs POPULATION, REST or another slice on a baseline run (descriptive delta, effect sizes, test)",
+    )
+    p.add_argument("a", help="slice definition file")
+    p.add_argument("b", help="slice definition file, POPULATION or REST")
+    p.add_argument("--baseline-run", required=True)
+    p.add_argument("--confidence", type=float)
+    p.add_argument("--resamples", type=int)
+    p.add_argument("--seed", type=int)
+    p.add_argument("--method", choices=["percentile", "bca"])
+    p.add_argument("--min-members", type=int)
+    slfmt(p)
+    p.set_defaults(func=_cmd_slice_compare)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

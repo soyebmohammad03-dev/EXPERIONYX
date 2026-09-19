@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Slice records (Phase 11)
+
+`Slice` (`sls_`) is a logical slice definition whose identity is its normalized condition; `SliceAnalysis`
+(`san_`) is one analysis run over a baseline (membership, metrics, comparisons and per-slice fault,
+failure-mode and interaction evidence live in digest-verified artifacts). See [slices.md](slices.md).
+
 ## Statistical analysis records (Phase 10)
 
 `StatisticalAnalysis` (`sta_`) is an immutable, content-addressed record of one computation: settings,

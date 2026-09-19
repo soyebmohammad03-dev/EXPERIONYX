@@ -42,6 +42,10 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     a p-value or an interval is never rendered as practical importance or causation
     ([statistics.md](statistics.md)).
 
+14. **A slice is a population, not a verdict.** Slice results are per-population observations with counts and
+    uncertainty. Missing metadata is never a match, thin slices are flagged, no group is ranked or scored,
+    and nothing says why a slice behaves differently ([slices.md](slices.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

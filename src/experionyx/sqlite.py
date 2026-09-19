@@ -57,11 +57,13 @@ from experionyx.interactions.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.slices.entities import Slice, SliceAnalysis
 from experionyx.stats.entities import StatisticalAnalysis
 
 # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
 # 6: interactions. 7: reliability profiles. 8: benchmarks. 9: statistical analyses.
-DB_SCHEMA_VERSION = 9
+# 10: slices and slice analyses.
+DB_SCHEMA_VERSION = 10
 
 
 @dataclass(frozen=True)
@@ -247,6 +249,13 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("analysis_kind", "input_hash", "engine_version", "analysis_status"),
         since=9,
     ),
+    Slice: _Spec("slices", plain=("name",), since=10),
+    SliceAnalysis: _Spec(
+        "slice_analyses",
+        refs=(("investigation_id", Investigation), ("run_id", Run)),
+        plain=("spec_id", "baseline_run_id", "dataset_fingerprint", "analysis_status"),
+        since=10,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -365,6 +374,12 @@ def _migrate_8_to_9(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_9_to_10(conn: sqlite3.Connection) -> None:
+    """Phase 11: slice definitions and slice analyses (new tables only)."""
+    for statement in _ddl(upto=10, since=10):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -374,6 +389,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     6: _migrate_6_to_7,
     7: _migrate_7_to_8,
     8: _migrate_8_to_9,
+    9: _migrate_9_to_10,
 }
 
 

@@ -28,6 +28,7 @@ class ProfileSpec:
     fault_experiments: tuple[str, ...] = ()
     interactions: tuple[str, ...] = ()
     failure_modes: tuple[str, ...] = ()
+    slice_analyses: tuple[str, ...] = ()  # san_ IDs; omitted from the identity when empty
 
     def __post_init__(self) -> None:
         v.member("scope", self.scope, Scope)
@@ -37,9 +38,12 @@ class ProfileSpec:
         )
         object.__setattr__(self, "interactions", _ids("interactions", self.interactions, "ian"))
         object.__setattr__(self, "failure_modes", _ids("failure_modes", self.failure_modes, "fmd"))
+        object.__setattr__(
+            self, "slice_analyses", _ids("slice_analyses", self.slice_analyses, "san")
+        )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        d: dict[str, object] = {
             "scope": self.scope.value,
             "baseline_run": self.baseline_run,
             "fault_experiments": list(self.fault_experiments),
@@ -47,6 +51,9 @@ class ProfileSpec:
             "failure_modes": list(self.failure_modes),
             "profile_version": PROFILE_VERSION,
         }
+        if self.slice_analyses:  # keeps the identity of every pre-Phase-11 profile unchanged
+            d["slice_analyses"] = list(self.slice_analyses)
+        return d
 
     @property
     def spec_id(self) -> str:
@@ -60,6 +67,7 @@ class ProfileSpec:
             "fault_experiments",
             "interactions",
             "failure_modes",
+            "slice_analyses",
             "profile_version",
         }
         if extra or "scope" not in d or "baseline_run" not in d:
@@ -85,4 +93,5 @@ class ProfileSpec:
             ids("fault_experiments"),
             ids("interactions"),
             ids("failure_modes"),
+            ids("slice_analyses"),
         )

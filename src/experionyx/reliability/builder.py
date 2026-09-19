@@ -25,6 +25,7 @@ from experionyx.provenance import Provenance
 from experionyx.registry import Registry
 from experionyx.reliability.spec import PROFILE_VERSION, ProfileSpec
 from experionyx.reliability.taxonomy import Dimension, DimensionStatus, RefKind, Scope
+from experionyx.slices.entities import SliceAnalysis
 
 FAULT_PATH = "fault/fault.json"
 NEVER_CLAIMED = [
@@ -245,6 +246,26 @@ def check_compatibility(
                         mid,
                     )
                 )
+    for sid in spec.slice_analyses:
+        try:
+            sa = registry.get(SliceAnalysis, sid)
+        except ExperionyxError:
+            issues.append(
+                _issue(
+                    "SLICE_ANALYSIS_MISSING",
+                    "a registered slice analysis",
+                    sid,
+                    "it cannot be summarized",
+                    sid,
+                )
+            )
+            continue
+        for label, want, got in (
+            ("baseline run", spec.baseline_run, sa.baseline_run_id),
+            ("dataset fingerprint", ctx.dataset_fingerprint, sa.dataset_fingerprint),
+        ):
+            if want != got:
+                issues.append(_issue("INCOMPATIBLE_SLICE_ANALYSIS", f"{label} {want}", f"{got}", f"the slice analysis was made over a different {label}", sid))  # fmt: skip
     if issues:
         raise ProfileRefusal(tuple(issues))
 
@@ -747,7 +768,12 @@ def _slices(registry: Registry, spec: ProfileSpec, ctx: Context, acc: _Acc) -> N
                         "interaction_contrast": (d or {}).get("interaction_contrast"),
                     }
                 )
-    if not (slices or classes or class_effects):
+    san_rows: list[dict[str, Any]] = []
+    for sid in spec.slice_analyses:
+        sa = registry.get(SliceAnalysis, sid)
+        san_rows.append({"source": {"kind": "SLICE_ANALYSIS", "id": sid, "spec_id": sa.spec_id, "provenance_fingerprint": sa.provenance_fingerprint}, "analysis_status": sa.analysis_status, "measure": to_jsonable(sa.summary.get("measure")), "slices": to_jsonable(sa.summary.get("slices")), "fault_status_counts": to_jsonable(sa.summary.get("fault_status_counts")), "failure_mode_status_counts": to_jsonable(sa.summary.get("failure_mode_status_counts")), "interaction_status_counts": to_jsonable(sa.summary.get("interaction_status_counts")), "note": "slice statuses are copied as recorded; a slice without enough evidence stays INSUFFICIENT_EVIDENCE or UNAVAILABLE"})  # fmt: skip
+        acc.ref(Dimension.SLICE_SENSITIVITY, RefKind.SLICE_ANALYSIS, sid, sa.analysis_status)
+    if not (slices or classes or class_effects or san_rows):
         acc.dim(
             Dimension.SLICE_SENSITIVITY,
             DimensionStatus.UNAVAILABLE,
@@ -769,6 +795,12 @@ def _slices(registry: Registry, spec: ProfileSpec, ctx: Context, acc: _Acc) -> N
                 else {
                     "status": "UNAVAILABLE",
                     "reason": "no class breakdown (regression or none stored)",
+                },
+                "slice_analyses": san_rows
+                if san_rows
+                else {
+                    "status": "UNAVAILABLE",
+                    "reason": "no slice analysis was referenced by the profile",
                 },
                 "interaction_class_or_slice_effects": class_effects
                 if class_effects
@@ -933,6 +965,16 @@ def provenance_fingerprint(
                 for i in spec.interactions
             },
             "modes": {m: registry.get(FailureMode, m).content_hash() for m in spec.failure_modes},
+            **(
+                {
+                    "slice_analyses": {
+                        s: registry.get(SliceAnalysis, s).provenance_fingerprint
+                        for s in spec.slice_analyses
+                    }
+                }
+                if spec.slice_analyses
+                else {}
+            ),
         }
     )
 

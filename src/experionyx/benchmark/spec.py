@@ -15,6 +15,8 @@ from experionyx.errors import ValidationError
 from experionyx.evaluation.config import EvaluationConfig
 from experionyx.hashing import HASH_PREFIX, content_hash
 from experionyx.interactions.config import InteractionConfig
+from experionyx.slices.analysis import SliceConfig
+from experionyx.slices.spec import SliceSpec
 
 ENGINE_VERSION = "1.0.0"  # the benchmark protocol/analysis methodology; bump when either changes
 SPEC_SCHEMA_VERSION = 1
@@ -217,6 +219,10 @@ class BenchmarkSpec:
     profile: bool = True  # assemble a Phase 8 reliability profile from the evidence
     limits: BenchmarkLimits = field(default_factory=BenchmarkLimits)
     schema_version: int = SPEC_SCHEMA_VERSION
+    slices: tuple[
+        SliceSpec, ...
+    ] = ()  # explicit request for a Phase 11 slice analysis (empty: none)
+    slice_config: SliceConfig = field(default_factory=SliceConfig)
 
     def __post_init__(self) -> None:
         if self.schema_version != SPEC_SCHEMA_VERSION:
@@ -248,6 +254,13 @@ class BenchmarkSpec:
         ):
             raise ValidationError("seeds must be a non-empty list of unique non-negative integers")
         object.__setattr__(self, "seeds", tuple(sorted(self.seeds)))
+        object.__setattr__(self, "slices", tuple(sorted(self.slices, key=lambda x: x.slice_id)))
+        if len({x.name for x in self.slices}) != len(self.slices) or len(
+            {x.slice_id for x in self.slices}
+        ) != len(self.slices):
+            raise ValidationError(
+                "benchmark slices must have unique names and distinct definitions"
+            )
         if (
             not 0.0 < self.aggregation_confidence < 1.0
             or self.aggregation_resamples < 1
@@ -257,7 +270,7 @@ class BenchmarkSpec:
 
     def to_dict(self) -> dict[str, object]:
         ev = to_jsonable(self.evaluation)
-        return {
+        d: dict[str, object] = {
             "name": self.name, "version": self.version, "model": self.model, "dataset": self.dataset,
             "evaluation": ev, "faults": [g.to_dict() for g in self.faults], "seeds": list(self.seeds),
             "interactions": [p.to_dict() for p in self.interactions], "primary_metric": self.primary_metric,
@@ -265,6 +278,12 @@ class BenchmarkSpec:
             "interaction_config": self.interaction_config.to_dict(), "discovery": self.discovery, "profile": self.profile,
             "limits": self.limits.to_dict(), "schema_version": self.schema_version,
         }  # fmt: skip
+        if (
+            self.slices
+        ):  # explicit request only; keeps the identity of every earlier benchmark unchanged
+            d["slices"] = [x.to_dict() for x in self.slices]
+            d["slice_config"] = self.slice_config.to_dict()
+        return d
 
     @property
     def spec_id(self) -> str:
@@ -294,6 +313,8 @@ class BenchmarkSpec:
             "profile",
             "limits",
             "schema_version",
+            "slices",
+            "slice_config",
         }
         extra = set(d) - known
         missing = {"name", "version", "model", "dataset", "faults", "seeds"} - set(d)
@@ -317,4 +338,6 @@ class BenchmarkSpec:
             InteractionConfig.from_dict(d["interaction_config"]) if d.get("interaction_config") else InteractionConfig(),
             bool(d.get("discovery", True)), bool(d.get("profile", True)),
             BenchmarkLimits.from_dict(d.get("limits", {})), int(d.get("schema_version", SPEC_SCHEMA_VERSION)),
+            tuple(SliceSpec.from_dict(x) for x in d.get("slices", [])),
+            SliceConfig.from_dict(d["slice_config"]) if d.get("slice_config") else SliceConfig(),
         )  # fmt: skip

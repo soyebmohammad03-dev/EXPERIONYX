@@ -265,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +303,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -344,7 +344,7 @@ def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
         assert new
         assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "statistical_analyses" in tables
         assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
@@ -360,3 +360,48 @@ def test_statistics_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> N
         SqliteRegistry(path)
     with sqlite3.connect(path) as raw:
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 8  # still the old version
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9])
+def test_every_prior_version_migrates_to_slice_tables_and_accepts_slices(
+    tmp_path: Path, version: int
+) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.slices.entities import Slice, SliceAnalysis
+    from experionyx.slices.registry import SliceRegistry
+    from experionyx.slices.spec import SliceSpec, between, label
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        sr = SliceRegistry(reg)
+        spec = SliceSpec("hard", label(1))
+        rec, created = sr.register(spec, datetime(2026, 1, 1, tzinfo=UTC))
+        assert created
+        assert reg.get(Slice, rec.id) == rec  # the new table works at once
+        again, created2 = sr.register(SliceSpec("renamed", between("feature:x", None, 2)))
+        assert created2
+        assert again.id != rec.id
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"slices", "slice_analyses"} <= tables
+        assert raw.execute("SELECT COUNT(*) FROM slices").fetchone()[0] == 2
+        assert raw.execute("SELECT COUNT(*) FROM slice_analyses").fetchone()[0] == 0
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+    assert SliceAnalysis.PREFIX == "san"
+
+
+def test_slice_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v9.sqlite"
+    make_database(path, 9)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE slice_analyses (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 9  # still the old version
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "slices" not in tables  # nothing half-applied
