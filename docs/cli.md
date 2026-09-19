@@ -35,6 +35,16 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx fault compare <baseline-run> <treatment-run>` | direction-aware degradation of one treatment against its control |
 | `experionyx fault experiment inspect <fxp_…> [--full]` | design, trials and analysis of a fault experiment |
 | `experionyx fault demo {tabular,tensor,labels}` | real example fault experiments |
+| `experionyx failure discover [--fault-experiment fxp_… …] [--run run_… …] [--investigation inv_…] [--config FILE] [--seed N]` | run failure discovery over stored fault experiments and evaluation runs as a real Run; lists the modes it produced. The home investigation is inferred when all sources share one, otherwise `--investigation` is required. `--config` is a strict `DiscoveryConfig` JSON |
+| `experionyx failures [--investigation I --status S --category C]` | list registered failure modes |
+| `experionyx failure inspect <fmd_… \| fcl_… \| fsg_…>` | a failure mode, cluster or signal |
+| `experionyx failure cluster [fcl_…] [--investigation I]` | list clusters, or one cluster with its member signals |
+| `experionyx failure candidates [filters]` | modes not yet confirmed, with their criteria checks (required vs observed) |
+| `experionyx failure evidence <fmd_…>` | all retained evidence of a mode |
+| `experionyx failure reproduce <fmd_…> [--config FILE]` | replay supporting runs as new runs and compare within tolerances; exit 1 if the check fails; never changes status |
+| `experionyx failure confirm <fmd_…> --by WHO --reason WHY` | confirm a `SUPPORTED`, reproduced mode (an explicit decision) |
+| `experionyx failure set-status <fmd_…> --to REJECTED\|DEPRECATED\|… --by WHO --reason WHY` | validated lifecycle change (never to `CONFIRMED`) |
+| `experionyx failure graph <fmd_…>` | relationships around a mode (backend graph, no visualization) |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`

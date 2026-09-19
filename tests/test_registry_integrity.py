@@ -28,7 +28,7 @@ from experionyx.provenance import (
     SourceRevision,
     SourceState,
 )
-from experionyx.sqlite import SqliteRegistry, _ddl
+from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry, _ddl
 from factories import (
     DIGEST,
     T0,
@@ -283,7 +283,7 @@ def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
     SqliteRegistry(path).close()
     with sqlite3.connect(path) as raw:
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION
     assert {
         "provenance",
         "outcomes",
@@ -292,5 +292,10 @@ def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
         "observations",
         "models",
         "datasets",
+        "failure_signals",
+        "failure_clusters",
+        "failure_modes",
+        "failure_evidence",
+        "failure_relationships",
     } <= tables
     assert any(x.startswith("CREATE TABLE provenance") for x in _ddl())

@@ -216,3 +216,69 @@ def test_phase4_database_migrates_to_fault_tables_and_keeps_everything(tmp_path:
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"fault_experiments", "fault_trials", "fault_analyses"} <= tables
     assert (tmp_path / "v3.sqlite.v3.bak").is_file()
+
+
+def test_phase5_database_migrates_to_failure_tables_and_keeps_everything(tmp_path: Path) -> None:
+    path = tmp_path / "v4.sqlite"
+    made = make_database(path, 4)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]
+        assert reg.find(Provenance)[0].inputs is None
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {
+            "failure_signals",
+            "failure_clusters",
+            "failure_modes",
+            "failure_evidence",
+            "failure_relationships",
+        } <= tables
+    assert (tmp_path / "v4.sqlite.v4.bak").is_file()
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_records(
+    tmp_path: Path, version: int
+) -> None:
+    from dataclasses import replace
+
+    from experionyx.failures.entities import FailureSignal
+    from failure_helpers import sig
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        run = reg.get(Run, made["run"].id)
+        s = replace(sig(1), run_id=run.id, experiment_id=run.experiment_id)
+        reg.add(s)  # the new tables work immediately after the stepwise migration
+        assert reg.get(FailureSignal, s.id) == s
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 5
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {
+            "failure_signals",
+            "failure_clusters",
+            "failure_modes",
+            "failure_evidence",
+            "failure_relationships",
+        } <= tables
+    assert (
+        tmp_path / f"v{version}.sqlite.v{version}.bak"
+    ).is_file()  # a backup is kept per migration
+    with SqliteRegistry(path) as reg:  # reopening a current database is a no-op
+        assert reg.get(FailureSignal, s.id) == s
+
+
+def test_failure_migration_is_atomic_when_a_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v4.sqlite"
+    make_database(path, 4)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE failure_modes (x INTEGER)")  # collides with the migration's DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 4  # still the old version
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "failure_signals" not in tables  # nothing half-applied

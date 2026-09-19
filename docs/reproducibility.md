@@ -14,6 +14,13 @@ Source revision; dependency versions; Python version; OS; hardware; model versio
 version; configuration; random seeds; execution parameters; generated artifacts; timestamps;
 environment identity (hash of the above).
 
+## Reproduction check (Phase 6)
+`experionyx failure reproduce` replays a failure mode's supporting runs as new runs and compares
+the reproduced signal magnitude to the original within configured tolerances, recording the
+original result, reproduction result, tolerance, pass/fail and provenance as evidence. This
+tests **repeatability in the current environment** of one recorded procedure, seed and input; it
+is not independent reproduction or replication ([failures.md](failures.md)).
+
 ## Status after Phase 2
 The execution engine now captures, per run: seed, configuration, environment (Python, OS,
 architecture, dependency versions), git commit and cleanliness, executor version, artifact SHA-256

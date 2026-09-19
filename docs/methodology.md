@@ -19,6 +19,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
    revision and artifacts.
 8. **Resource awareness.** Experiments must be designed to run on realistic local hardware.
 
+9. **Discovery is grouping, not explanation.** Failure discovery groups measured signals under
+   configured, versioned rules and reports which groups meet configured evidence requirements. A
+   discovered pattern is a candidate until it is reproduced and a person confirms it, and it never
+   carries a causal claim ([failures.md](failures.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

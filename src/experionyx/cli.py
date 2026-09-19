@@ -6,7 +6,7 @@ import json
 import logging
 import platform
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -40,6 +40,16 @@ from experionyx.evaluation.metrics import default_metric_registry
 from experionyx.evaluation.results import EvaluationResult
 from experionyx.evaluation.serial import from_jsonable
 from experionyx.execution import ExecutionResult, Executor, resolve_procedure, run_states
+from experionyx.failures.config import DiscoveryConfig
+from experionyx.failures.engine import run_discovery
+from experionyx.failures.entities import (
+    FailureCluster,
+    FailureEvidence,
+    FailureMode,
+    FailureSignal,
+)
+from experionyx.failures.lifecycle import change_status, confirm, graph, reproduce
+from experionyx.failures.taxonomy import FailureCategory, FailureStatus
 from experionyx.faults.degradation import measure_degradation, measure_latency
 from experionyx.faults.demos import FAULT_DEMOS, run_fault_demo
 from experionyx.faults.design import FaultDesign, FaultLimits, SweepSpec
@@ -602,6 +612,222 @@ def _cmd_fault_experiment_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- failure discovery -----------------------------------------------------------------------------
+
+
+def _discovery_config(path: str | None) -> DiscoveryConfig:
+    if path is None:
+        return DiscoveryConfig()
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read --config {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("--config must be a JSON object")
+    return DiscoveryConfig.from_dict(data)
+
+
+def _mode_row(m: FailureMode) -> dict[str, object]:
+    meas = m.structured.get("measurements")
+    size = meas.get("size") if isinstance(meas, Mapping) else None
+    return {
+        "id": m.id,
+        "status": m.status.value,
+        "category": m.category.value,
+        "title": m.title,
+        "signals": size,
+        "cluster_id": m.cluster_id,
+        "investigation_id": m.investigation_id,
+    }
+
+
+def _find_modes(reg: SqliteRegistry, args: argparse.Namespace) -> list[FailureMode]:
+    filters = {
+        k: v
+        for k, v in (
+            ("investigation_id", args.investigation),
+            ("status", args.status),
+            ("category", args.category),
+        )
+        if v
+    }
+    return reg.find(FailureMode, **filters)
+
+
+def _cmd_failures_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(
+            {
+                "failure_modes": [_mode_row(m) for m in _find_modes(reg, args)],
+                "note": "status DISCOVERED/CANDIDATE/SUPPORTED are machine-assigned from configured criteria; only CONFIRMED involved a person",
+            }
+        )
+    return 0
+
+
+def _cmd_failure_candidates(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        rows = []
+        for m in _find_modes(reg, args):
+            if m.status in (
+                FailureStatus.DISCOVERED,
+                FailureStatus.CANDIDATE,
+                FailureStatus.SUPPORTED,
+            ):
+                rows.append({**_mode_row(m), "criteria": to_jsonable(m.structured["criteria"])})
+        _dump({"candidates": rows})
+    return 0
+
+
+def _cmd_failure_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        prefix = args.id.split("_", 1)[0]
+        cls = {"fmd": FailureMode, "fcl": FailureCluster, "fsg": FailureSignal}.get(prefix)
+        if cls is None:
+            raise ExperionyxError(
+                "expected a failure mode (fmd_), cluster (fcl_) or signal (fsg_) ID"
+            )
+        _dump(_record(reg.get(cls, args.id)))
+    return 0
+
+
+def _cmd_failure_cluster(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        if args.id:
+            cl = reg.get(FailureCluster, args.id)
+            members = [reg.get(FailureSignal, i) for i in cl.signal_ids]
+            _dump(
+                {
+                    "cluster": _record(cl),
+                    "members": [
+                        {
+                            "id": s.id,
+                            "run_id": s.run_id,
+                            "kind": s.signal_kind.value,
+                            "signature": s.signature,
+                            "magnitude": s.magnitude,
+                            "sample_count": s.sample_count,
+                        }
+                        for s in members
+                    ],
+                }
+            )
+        else:
+            filt = {"investigation_id": args.investigation} if args.investigation else {}
+            _dump(
+                {
+                    "clusters": [
+                        {
+                            "id": c.id,
+                            "size": len(c.signal_ids),
+                            "algorithm": c.algorithm,
+                            "compactness": c.metrics.get("compactness"),
+                            "stability": c.metrics.get("stability"),
+                        }
+                        for c in reg.find(FailureCluster, **filt)
+                    ]
+                }
+            )
+    return 0
+
+
+def _cmd_failure_evidence(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        reg.get(FailureMode, args.id)
+        _dump(
+            {
+                "mode_id": args.id,
+                "evidence": [
+                    _record(e) for e in reg.find(FailureEvidence, failure_mode_id=args.id)
+                ],
+            }
+        )
+    return 0
+
+
+def _infer_investigation(reg: SqliteRegistry, args: argparse.Namespace) -> str:
+    """The investigation a discovery is homed in. Sources may come from several investigations;
+    then the home must be chosen explicitly."""
+    if args.investigation:
+        reg.get(Investigation, args.investigation)
+        return str(args.investigation)
+    found = {reg.get(FaultExperiment, i).investigation_id for i in args.fault_experiment}
+    found |= {reg.get(Experiment, reg.get(Run, i).experiment_id).investigation_id for i in args.run}
+    if len(found) != 1:
+        raise ExperionyxError(
+            f"sources span investigations {sorted(found)}; choose the home with --investigation"
+        )
+    return found.pop()
+
+
+def _cmd_failure_discover(args: argparse.Namespace) -> int:
+    cfg = _discovery_config(args.config)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        res = run_discovery(
+            reg,
+            store,
+            _executor(reg, args.workspace),
+            _infer_investigation(reg, args),
+            args.run,
+            args.fault_experiment,
+            cfg,
+            seed=args.seed,
+        )
+        ids: list[str] = []
+        if res.status is RunStatus.COMPLETED:  # exactly the modes THIS discovery produced
+            listed = read_artifact(reg, store, res.run_id, "failure-candidates.json")
+            ids = [str(m["id"]) for m in listed["modes"]] if isinstance(listed, dict) else []
+        _dump(
+            {
+                "discovery_run": res.run_id,
+                "experiment": res.experiment_id,
+                "status": res.status.value,
+                "config_hash": cfg.config_hash,
+                "failure_modes": [_mode_row(reg.get(FailureMode, i)) for i in ids],
+            }
+        )
+        return 0 if res.status.value == "COMPLETED" else 1
+
+
+def _cmd_failure_reproduce(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        r = reproduce(
+            reg, store, _executor(reg, args.workspace), args.id, _discovery_config(args.config)
+        )
+        _dump(
+            {
+                "mode_id": r.mode_id,
+                "attempted": r.attempted,
+                "passed_count": r.passed_count,
+                "passed": r.passed,
+                "runs_not_replayed": r.runs_not_replayed,
+                "records": to_jsonable(r.records),
+                "note": "reproduction does not change the mode's status; confirmation is a separate, explicit step",
+            }
+        )
+        return 0 if r.passed else 1
+
+
+def _cmd_failure_confirm(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(_mode_row(confirm(reg, args.id, args.by, args.reason)))
+    return 0
+
+
+def _cmd_failure_set_status(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(_mode_row(change_status(reg, args.id, FailureStatus(args.to), args.by, args.reason)))
+    return 0
+
+
+def _cmd_failure_graph(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        _dump(graph(reg, args.id))
+    return 0
+
+
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
     ws = Path(args.workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -821,6 +1047,69 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id", help="fault experiment ID (fxp_...)")
     p.add_argument("--full", action="store_true", help="include the complete analysis")
     p.set_defaults(func=_cmd_fault_experiment_inspect)
+
+    def fail_filters(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--investigation", help="only this investigation (inv_...)")
+        q.add_argument("--status", choices=[x.value for x in FailureStatus])
+        q.add_argument("--category", choices=[x.value for x in FailureCategory])
+
+    fail_filters(add("failures", _cmd_failures_list, "list registered failure modes"))
+    fail = group("failure", "failure discovery and the failure registry")
+    p = fail.add_parser("inspect", help="a failure mode, cluster or signal")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_failure_inspect)
+    p = fail.add_parser(
+        "discover", help="run failure discovery over stored runs and fault experiments"
+    )
+    p.add_argument(
+        "--fault-experiment", action="append", default=[], help="fault experiment ID (repeatable)"
+    )
+    p.add_argument("--run", action="append", default=[], help="evaluation run ID (repeatable)")
+    p.add_argument(
+        "--investigation",
+        help="home investigation of the result (inferred when all sources share one)",
+    )
+    p.add_argument("--config", help="DiscoveryConfig JSON file (default: built-in configuration)")
+    p.add_argument(
+        "--seed", type=int, default=0, help="run seed (the discovery itself is deterministic)"
+    )
+    p.set_defaults(func=_cmd_failure_discover)
+    p = fail.add_parser(
+        "cluster", help="list clusters, or show one cluster with its member signals"
+    )
+    p.add_argument("id", nargs="?")
+    p.add_argument("--investigation")
+    p.set_defaults(func=_cmd_failure_cluster)
+    p = fail.add_parser("candidates", help="modes not yet confirmed, with their criteria checks")
+    fail_filters(p)
+    p.set_defaults(func=_cmd_failure_candidates)
+    p = fail.add_parser("evidence", help="all retained evidence of a mode")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_failure_evidence)
+    p = fail.add_parser("reproduce", help="replay supporting runs and compare within tolerances")
+    p.add_argument("id")
+    p.add_argument("--config", help="the DiscoveryConfig JSON the mode was discovered with")
+    p.set_defaults(func=_cmd_failure_reproduce)
+    p = fail.add_parser("confirm", help="CONFIRM a SUPPORTED, reproduced mode (explicit decision)")
+    p.add_argument("id")
+    p.add_argument("--by", required=True, help="who is making the decision")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=_cmd_failure_confirm)
+    p = fail.add_parser("set-status", help="reject or deprecate (or otherwise move) a mode")
+    p.add_argument("id")
+    p.add_argument(
+        "--to",
+        required=True,
+        choices=[x.value for x in FailureStatus if x is not FailureStatus.CONFIRMED],
+    )
+    p.add_argument("--by", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=_cmd_failure_set_status)
+    p = fail.add_parser(
+        "graph", help="relationships around a mode (backend graph, no visualization)"
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_failure_graph)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

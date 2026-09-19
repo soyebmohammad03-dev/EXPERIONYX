@@ -51,6 +51,15 @@ evidence target (`target_kind` + `target_id`).
 - `with_status()` enforces these transitions. `ClaimStatus` values are domain states only; no
   code evaluates a claim against evidence yet.
 
+## Failure records (Phase 6)
+
+`FailureSignal` (`fsg_`), `FailureCluster` (`fcl_`), `FailureMode` (`fmd_`), `FailureEvidence`
+(`fev_`) and `FailureRelationship` (`frl_`) follow the same rules as the other entities:
+immutable, content-addressed, strictly validated. A signal and a cluster are observations and
+groupings; only a mode has a lifecycle, `DISCOVERED -> CANDIDATE -> SUPPORTED -> CONFIRMED`
+(plus `REJECTED`/`DEPRECATED`), with validated transitions and retained evidence. See
+[failures.md](failures.md).
+
 ## Observation kinds
 `Observation.epistemic_kind` is `OBSERVATION` or `DERIVED_METRIC` (never interpretation or
 hypothesis), following [methodology.md](methodology.md).

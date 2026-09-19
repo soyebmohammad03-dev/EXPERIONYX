@@ -6,6 +6,14 @@ Investigation → Experiment definition → Run preparation → Environment capt
 Observation collection → Artifact generation → Analysis → Statistical evaluation →
 Evidence registration → Reproduction → Conclusion
 
+## Failure modes
+
+A failure mode has its own lifecycle, separate from the experiment lifecycle: `DISCOVERED ->
+CANDIDATE -> SUPPORTED -> CONFIRMED`, plus `REJECTED` and `DEPRECATED`. Signals (one observation
+from one run) and clusters (a grouping) are distinct from a candidate mode, and a mode is only
+`CONFIRMED` after a passing reproduction check and an explicit decision by a person. Discovery
+itself is an ordinary Run. See [failures.md](failures.md).
+
 ## Distinctions
 
 | Concept | Meaning |

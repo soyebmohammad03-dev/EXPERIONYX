@@ -4,6 +4,7 @@ from contextlib import AbstractContextManager
 from typing import Protocol, TypeVar
 
 from experionyx.domain import Entity, Experiment, Run
+from experionyx.failures.entities import FailureMode
 from experionyx.faults.entities import FaultExperiment
 
 E = TypeVar("E", bound=Entity)
@@ -28,7 +29,7 @@ class Registry(Protocol):
         """All records of `cls` whose indexed fields equal `filters`, ordered by ID."""
         ...
 
-    def update_status(self, entity: Experiment | Run | FaultExperiment) -> None:
+    def update_status(self, entity: Experiment | Run | FaultExperiment | FailureMode) -> None:
         """Persist a legal status transition. Everything except `status` must be unchanged."""
         ...
 

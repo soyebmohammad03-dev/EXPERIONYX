@@ -123,3 +123,11 @@ class FaultCompatibilityError(FaultError):
 
 class FaultLimitError(FaultError):
     """A fault experiment exceeds a configured safety limit; nothing was run."""
+
+
+class FailureError(ExperionyxError):
+    """Failure discovery, registration or reproduction problem."""
+
+
+class FailureLimitError(FailureError):
+    """A configured discovery bound was exceeded and the work cannot be done honestly."""

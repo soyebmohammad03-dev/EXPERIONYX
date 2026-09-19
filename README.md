@@ -2,12 +2,12 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 5 (fault injection laboratory).** The typed domain model, a local SQLite registry,
+> **Status: Phase 6 (failure registry and discovery).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
-> treatment runs; degradation with direction-aware metrics) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
-> implemented yet. Everything below marked *planned* is an architecture target, not a feature.
+> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. Drift, statistics and reports are
+> not implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
 
@@ -63,6 +63,12 @@ See [docs/architecture.md](docs/architecture.md) and
   scopes, real parameter sweeps and repeated seeds against a baseline control, degradation
   measurement, transparent effect thresholds, and evidence links. It measures effects; it does not
   declare models failed.
+- Failure registry and discovery ([docs/failures.md](docs/failures.md)): normalized failure signals
+  extracted from stored evaluations and fault experiments, interpretable similarity with reasons,
+  deterministic clustering with stability diagnostics, configurable evidence criteria, a
+  reproduction check, and a validated lifecycle (`DISCOVERED` to `CONFIRMED`) in which nothing is
+  confirmed automatically. It groups measured signals; it makes no causal claim and no LLM is
+  involved.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
