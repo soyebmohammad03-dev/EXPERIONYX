@@ -289,6 +289,8 @@ def test_wilson_ground_truth_and_edges() -> None:
     assert (
         zero.lower == 0.0 and zero.upper is not None and zero.upper > 0.0
     )  # never a zero-width claim
+    all_ = proportion_interval(20, 20)
+    assert all_.upper == 1.0 and all_.lower is not None and all_.lower < 1.0
     assert proportion_interval(0, 0).status is Status.UNDEFINED
     assert proportion_interval(1, 5).warnings
     with pytest.raises(ValidationError):

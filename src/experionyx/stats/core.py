@@ -611,6 +611,7 @@ def proportion_interval(
         else ()
     )
     return ProportionInterval(
-        Status.DERIVED, estimate=p, lower=max(0.0, centre - half), upper=min(1.0, centre + half),
+        Status.DERIVED, estimate=p, lower=0.0 if successes == 0 else max(0.0, centre - half),
+        upper=1.0 if successes == trials else min(1.0, centre + half),  # exact: no float residue
         warnings=warn, **base,  # type: ignore[arg-type]
     )  # fmt: skip
