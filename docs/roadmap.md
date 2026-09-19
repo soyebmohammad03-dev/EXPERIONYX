@@ -12,7 +12,7 @@
 7. Fault Interaction Analysis (done)
 8. Reliability Profiles (done)
 9. Robustness Benchmark Engine (done)
-10. Reproducibility + Statistical Engine (also the home of the interaction limitations: control variability, BCa, multiplicity)
+10. Statistical Analysis & Evidence Engine (done; BCa for interaction contrasts and control-variability modelling remain open)
 11. Drift Laboratory
 12. Evidence Graph
 13. Reliability Analysis (statistical, building on profiles and benchmarks)

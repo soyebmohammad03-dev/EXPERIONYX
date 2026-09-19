@@ -265,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 8
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +303,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 8
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -325,3 +325,38 @@ def test_benchmark_migration_is_atomic_when_a_step_fails(tmp_path: Path) -> None
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 7  # still the old version
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "benchmarks" not in tables  # nothing half-applied
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8])
+def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
+    tmp_path: Path, version: int
+) -> None:
+    from experionyx.stats import store as stats_store
+    from experionyx.stats.entities import StatisticalAnalysis
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        a, new = stats_store.create(
+            reg, None, "PROPORTION", {"kind": "inline", "successes": 3, "trials": 10}
+        )
+        assert new
+        assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 9
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "statistical_analyses" in tables
+        assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+
+
+def test_statistics_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v8.sqlite"
+    make_database(path, 8)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE statistical_analyses (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 8  # still the old version

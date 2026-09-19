@@ -68,6 +68,7 @@ class EvidenceTarget(StrEnum):
     RUN = "RUN"
     OBSERVATION = "OBSERVATION"
     ARTIFACT = "ARTIFACT"
+    STATISTICAL_ANALYSIS = "STATISTICAL_ANALYSIS"
 
 
 class EvidenceRelation(StrEnum):
@@ -565,7 +566,7 @@ class Evidence(Entity):
     def __post_init__(self) -> None:
         v.ref("claim_id", self.claim_id, Claim.PREFIX)
         kind = v.member("target_kind", self.target_kind, EvidenceTarget)
-        v.ref("target_id", self.target_id, EVIDENCE_TARGET_TYPES[kind].PREFIX)
+        v.ref("target_id", self.target_id, evidence_target_type(kind).PREFIX)
         v.member("relation", self.relation, EvidenceRelation)
         v.timestamp("created_at", self.created_at)
         if self.note is not None:
@@ -602,3 +603,11 @@ EVIDENCE_TARGET_TYPES: Mapping[EvidenceTarget, type[Entity]] = {
     EvidenceTarget.OBSERVATION: Observation,
     EvidenceTarget.ARTIFACT: Artifact,
 }
+
+
+def evidence_target_type(kind: EvidenceTarget) -> type[Entity]:
+    if kind is EvidenceTarget.STATISTICAL_ANALYSIS:  # lazy: the stats package imports this module
+        from experionyx.stats.entities import StatisticalAnalysis
+
+        return StatisticalAnalysis
+    return EVIDENCE_TARGET_TYPES[kind]

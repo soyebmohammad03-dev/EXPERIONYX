@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Statistical analysis records (Phase 10)
+
+`StatisticalAnalysis` (`sta_`) is an immutable, content-addressed record of one computation: settings,
+sources (references into digest-verified artifacts, or inline inputs), result and digests. It can be cited
+as claim evidence. See [statistics.md](statistics.md).
+
 ## Benchmark records (Phase 9)
 
 `Benchmark` (`bmk_`, the versioned definition), `BenchmarkResult` (`brs_`, one execution's coverage and

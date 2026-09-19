@@ -230,11 +230,15 @@ def bootstrap(cells: CellValues, cfg: InteractionConfig, pairing: Pairing) -> Bo
         vals.sort()
         p = point[name]
         same = None if p is None or p == 0 else sum((x > 0) == (p > 0) for x in vals) / len(vals)
+        # smallest two-sided level at which the percentile interval would exclude zero (+1 smoothing);
+        # an approximate inversion of the interval, NOT an exact test of a null hypothesis
+        tail = min(sum(x <= 0 for x in vals), sum(x >= 0 for x in vals))
         intervals[name] = {
             "lower": quantile(vals, alpha),
             "upper": quantile(vals, 1.0 - alpha),
             "sign_fraction": same,
             "n": float(len(vals)),
+            "bootstrap_p": min(1.0, 2.0 * (tail + 1) / (len(vals) + 1)),
         }
     warn = [
         "percentile interval: descriptive spread of trial-level resampling, not a significance test"

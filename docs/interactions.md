@@ -176,7 +176,7 @@ experionyx interaction set-status ian_... --to REJECTED|DEPRECATED --by WHO --re
 
 - One control run holds Y0 fixed; its variability is not in the interval.
 - Interval quality depends on the number of trials; the defaults need >= 3 per treatment cell.
-- Percentile bootstrap only; the label rules are heuristics, not a hypothesis test.
+- Percentile bootstrap only (BCa is not offered for a four-cell contrast); the label rules are heuristics, not a hypothesis test. An optional multiplicity correction is reported per effect but does not change labels ([statistics.md](statistics.md)).
 - The additive contrast is one reference model; a non-zero contrast does not say why.
 - Per-sample IDs are dataset indices; label faults cannot be analyzed per sample.
 - No `compare` command between two analyses; use `export` and `related`.

@@ -14,6 +14,7 @@ from experionyx.interactions.taxonomy import (
     Level,
     Pairing,
 )
+from experionyx.stats.core import adjust_pvalues
 
 NOTE = "an observed interaction contrast under the stated design; not a causal or mechanistic claim"
 
@@ -172,10 +173,23 @@ def analyze(d: LoadedDesign) -> dict[str, object]:
     by_level: dict[str, int] = {}
     for e in effects:
         by_level[str(e["level"])] = by_level.get(str(e["level"]), 0) + 1
-    return {
-        "primary_metric": primary_metric(d), "primary_class": interp["class"], "effects": effects,
-        "multiplicity": {"hypotheses_tested": len(effects), "by_level": by_level, "adjustment": "none", "note": "exploratory: every measure is a separate contrast and no multiplicity adjustment is applied; treat non-primary results as hypotheses to confirm with new trials"},
-    }  # fmt: skip
+    method = d.spec.config.multiplicity_correction
+    rec: dict[str, object] = {"hypotheses_tested": len(effects), "by_level": by_level, "adjustment": "none", "note": "exploratory: every measure is a separate contrast and no multiplicity adjustment is applied; treat non-primary results as hypotheses to confirm with new trials"}  # fmt: skip
+    if method != "NONE":
+        ps: dict[str, float | None] = {}
+        for e in effects:
+            b = e["bootstrap"]
+            iv = b["intervals"].get("interaction_contrast") if isinstance(b, Mapping) else None
+            ps[str(e["name"])] = None if iv is None else iv["bootstrap_p"]
+        corr = adjust_pvalues(ps, method=method, alpha=1.0 - d.spec.config.confidence)
+        for e in effects:
+            n = str(e["name"])
+            e["multiplicity"] = {"raw_bootstrap_p": ps[n], "adjusted_p": corr.adjusted.get(n), "survives_correction": corr.rejected.get(n)}  # fmt: skip
+        rec.update(
+            adjustment=method.lower(), correction=to_jsonable(corr),
+            note=f"{method} applied across the {corr.n_hypotheses} contrasts of this analysis as one family; p-values are inversions of the percentile interval (approximate), labels above are unchanged, and the adjustment does not turn a contrast into a causal claim",
+        )  # fmt: skip
+    return {"primary_metric": primary_metric(d), "primary_class": interp["class"], "effects": effects, "multiplicity": rec}  # fmt: skip
 
 
 def classes_of(result: Mapping[str, object]) -> dict[str, str]:

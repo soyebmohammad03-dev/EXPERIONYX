@@ -37,6 +37,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     and was not executed. Missing coverage is never robustness, results are comparable only under an
     identical protocol, and no score, ranking or verdict is computed ([benchmarks.md](benchmarks.md)).
 
+13. **A p-value is not a finding.** Statistical results state their method, assumptions, uncertainty
+    and any correction, keep raw observations reachable, and are reproducible from persisted evidence;
+    a p-value or an interval is never rendered as practical importance or causation
+    ([statistics.md](statistics.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

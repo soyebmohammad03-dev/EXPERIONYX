@@ -40,6 +40,7 @@ class InteractionConfig:
     min_sign_fraction: float = 0.95  # share of resamples with the sign of the point contrast
     require_same_environment: bool = True
     prevalence_delta_min: float = 0.2  # failure-mode prevalence change treated as increased/reduced
+    multiplicity_correction: str = "NONE"  # NONE | BONFERRONI | BENJAMINI_HOCHBERG (reported only)
     schema_version: int = CONFIG_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -56,12 +57,18 @@ class InteractionConfig:
             raise ValidationError("min_sign_fraction must be in [0.5, 1]")
         if self.max_samples < 1:
             raise ValidationError("max_samples must be >= 1")
+        if self.multiplicity_correction not in ("NONE", "BONFERRONI", "BENJAMINI_HOCHBERG"):
+            raise ValidationError("multiplicity_correction: NONE, BONFERRONI or BENJAMINI_HOCHBERG")
         if list(self.metrics) != sorted(set(self.metrics)):
             raise ValidationError("metrics must be sorted and unique")
 
     def to_dict(self) -> dict[str, object]:
         data = to_jsonable(self)
         assert isinstance(data, dict)  # noqa: S101
+        if self.multiplicity_correction == "NONE":
+            data.pop(
+                "multiplicity_correction"
+            )  # keeps the identity of pre-Phase-10 specs unchanged
         return data
 
     @property

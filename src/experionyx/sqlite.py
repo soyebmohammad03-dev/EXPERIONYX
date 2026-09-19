@@ -17,7 +17,6 @@ from typing import Self
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.benchmark.entities import Benchmark, BenchmarkResult, BenchmarkUnit
 from experionyx.domain import (
-    EVIDENCE_TARGET_TYPES,
     Artifact,
     Claim,
     ConfigurationRef,
@@ -29,6 +28,7 @@ from experionyx.domain import (
     Observation,
     Run,
     RunStatus,
+    evidence_target_type,
 )
 from experionyx.errors import (
     ConcurrentModificationError,
@@ -57,10 +57,11 @@ from experionyx.interactions.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.stats.entities import StatisticalAnalysis
 
 # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
-# 6: interactions. 7: reliability profiles. 8: benchmarks.
-DB_SCHEMA_VERSION = 8
+# 6: interactions. 7: reliability profiles. 8: benchmarks. 9: statistical analyses.
+DB_SCHEMA_VERSION = 9
 
 
 @dataclass(frozen=True)
@@ -241,6 +242,11 @@ _SPECS: dict[type[Entity], _Spec] = {
         optional=("run_id",),
         since=8,
     ),
+    StatisticalAnalysis: _Spec(
+        "statistical_analyses",
+        plain=("analysis_kind", "input_hash", "engine_version", "analysis_status"),
+        since=9,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -353,6 +359,12 @@ def _migrate_7_to_8(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_8_to_9(conn: sqlite3.Connection) -> None:
+    """Phase 10: statistical analyses (new table only)."""
+    for statement in _ddl(upto=9, since=9):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -361,6 +373,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     5: _migrate_5_to_6,
     6: _migrate_6_to_7,
     7: _migrate_7_to_8,
+    8: _migrate_8_to_9,
 }
 
 
@@ -460,7 +473,7 @@ class SqliteRegistry:
                     self._require(target, value, f"{spec.table}.{column}")
             if isinstance(entity, Evidence):
                 self._require(
-                    EVIDENCE_TARGET_TYPES[entity.target_kind],
+                    evidence_target_type(entity.target_kind),
                     entity.target_id,
                     "evidence.target_id",
                 )

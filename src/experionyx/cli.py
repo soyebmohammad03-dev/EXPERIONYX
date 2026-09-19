@@ -92,6 +92,8 @@ from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.registry import ReliabilityProfileRegistry
 from experionyx.reliability.spec import ProfileSpec
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
+from experionyx.stats import store as stats_store
+from experionyx.stats.entities import StatisticalAnalysis
 
 DEFAULT_WORKSPACE = ".experionyx"
 REGISTRY_FILE = "registry.sqlite"
@@ -1573,6 +1575,145 @@ def _cmd_recover(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- statistics --------------------------------------------------------------------------------------
+
+
+def _floats(text: str) -> list[float]:
+    try:
+        return [float(x) for x in text.split(",") if x.strip()]
+    except ValueError as exc:
+        raise ExperionyxError(f"not a comma-separated list of numbers: {text!r}") from exc
+
+
+def _stats_row(a: StatisticalAnalysis) -> dict[str, object]:
+    return {
+        "id": a.id,
+        "kind": a.analysis_kind,
+        "status": a.analysis_status,
+        "source": a.sources.get("kind"),
+        "input_hash": a.input_hash,
+        "engine_version": a.engine_version,
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+def _stats_sources(args: argparse.Namespace) -> dict[str, object]:
+    if args.file:
+        doc = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        return {"kind": "inline", **doc}
+    if getattr(args, "fault_experiment", None):
+        return {
+            "kind": "fault_trials", "fault_experiment_id": args.fault_experiment,
+            "metric": args.measure, "point_index": args.point_index,
+            "reference_field": args.reference_field, "treatment_field": args.treatment_field,
+        }  # fmt: skip
+    if getattr(args, "interaction", None):
+        return {
+            "kind": "interaction", "analysis_id": args.interaction, "measure": args.measure,
+            "reference_cell": args.reference_cell, "treatment_cell": args.treatment_cell,
+        }  # fmt: skip
+    if getattr(args, "artifact", None):
+        run_id, path = args.artifact
+        out: dict[str, object] = {
+            "kind": "artifact", "run_id": run_id, "path": path,
+            "reference": args.reference_pointer.split("/"),
+        }  # fmt: skip
+        if args.treatment_pointer:
+            out["treatment"] = args.treatment_pointer.split("/")
+        return out
+    if args.reference_values is None:
+        raise ExperionyxError(
+            "give values (--reference-values), a --file, an --interaction or an --artifact"
+        )
+    src: dict[str, object] = {"kind": "inline", "reference": _floats(args.reference_values)}
+    if args.treatment_values is not None:
+        src["treatment"] = _floats(args.treatment_values)
+    return src
+
+
+def _stats_run(
+    args: argparse.Namespace, kind: str, sources: dict[str, object], cfg: dict[str, object]
+) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        a, new = stats_store.create(reg, store, kind, sources, cfg)
+        _emit(
+            {**_stats_row(a), "new": new, "config": to_jsonable(a.config), "result": to_jsonable(a.result)},
+            f"{a.id} {kind} {a.analysis_status}{'' if new else ' (already registered)'}", args,
+        )  # fmt: skip
+    return 0
+
+
+def _stats_cfg(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        k: getattr(args, k)
+        for k in ("pairing", "estimator", "method", "confidence", "resamples", "seed")
+        if getattr(args, k) is not None
+    }
+
+
+def _cmd_stats_compare(args: argparse.Namespace) -> int:
+    cfg = _stats_cfg(args)
+    if args.permutations is not None:
+        cfg["permutations"] = args.permutations
+    return _stats_run(args, "COMPARE", _stats_sources(args), cfg)
+
+
+def _cmd_stats_bootstrap(args: argparse.Namespace) -> int:
+    return _stats_run(args, "BOOTSTRAP", _stats_sources(args), _stats_cfg(args))
+
+
+def _cmd_stats_proportion(args: argparse.Namespace) -> int:
+    if args.failure_mode:
+        src: dict[str, object] = {"kind": "failure_mode", "mode_id": args.failure_mode}
+    elif args.successes is not None and args.trials is not None:
+        src = {"kind": "inline", "successes": args.successes, "trials": args.trials}
+    else:
+        raise ExperionyxError("give --successes and --trials, or --failure-mode")
+    cfg = {} if args.confidence is None else {"confidence": args.confidence}
+    return _stats_run(args, "PROPORTION", src, cfg)
+
+
+def _cmd_stats_correct(args: argparse.Namespace) -> int:
+    if args.analysis:
+        src: dict[str, object] = {"kind": "analyses", "ids": sorted(args.analysis)}
+    else:
+        try:
+            ps = {k: float(x) for k, _, x in (p.partition("=") for p in args.p)}
+        except ValueError as exc:
+            raise ExperionyxError("--p needs name=value with a numeric value") from exc
+        src = {"kind": "inline", "pvalues": ps}
+    cfg = {k: getattr(args, k) for k in ("method", "alpha") if getattr(args, k) is not None}
+    return _stats_run(args, "CORRECTION", src, cfg)
+
+
+def _cmd_stats_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        rows = [
+            _stats_row(a)
+            for a in sorted(reg.find(StatisticalAnalysis), key=lambda a: a.id)
+            if not args.kind or a.analysis_kind == args.kind
+        ]
+    _emit({"analyses": rows}, "\n".join(f"{r['id']} {r['kind']} {r['status']}" for r in rows), args)
+    return 0
+
+
+def _cmd_stats_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        a = reg.get(StatisticalAnalysis, args.id)
+    doc = {**_stats_row(a), "config": to_jsonable(a.config), "sources": to_jsonable(a.sources), "result": to_jsonable(a.result), "result_hash": a.result_hash}  # fmt: skip
+    _emit(doc, f"{a.id} {a.analysis_kind} {a.analysis_status} inputs {a.input_hash[7:19]}", args)
+    return 0
+
+
+def _cmd_stats_verify(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        out = stats_store.verify(reg, store, args.id)
+    _emit(out, f"{args.id} {'reproduced' if out['reproduced'] else 'NOT reproduced'}", args)
+    return 0 if out["reproduced"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -1997,6 +2138,103 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_benchmark_replay)
+
+    st = group(
+        "stats",
+        "statistical analysis: intervals, comparisons, corrections (recorded, reproducible)",
+    )
+
+    def sfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    def ssource(q: argparse.ArgumentParser, *, treatment: bool) -> None:
+        q.add_argument("--reference-values", help="comma-separated numbers")
+        q.add_argument("--treatment-values", help="comma-separated numbers")
+        q.add_argument(
+            "--file",
+            help='JSON {"reference": ..., "treatment": ...}; mappings key->value keep identity (needed for PAIRED)',
+        )
+        q.add_argument(
+            "--interaction", help="an interaction analysis ID (ian_): read its trial values"
+        )
+        q.add_argument("--measure", help="metric name (interaction and fault sources)")
+        q.add_argument(
+            "--fault-experiment",
+            help="a fault experiment ID (fxp_): per-seed values of its analysis",
+        )
+        q.add_argument("--point-index", type=int, default=0)
+        q.add_argument(
+            "--reference-field",
+            default="baseline",
+            help="fault trial field: baseline|faulted|deterioration|...",
+        )
+        q.add_argument("--treatment-field", default="faulted")
+        q.add_argument("--reference-cell", default="CONTROL")
+        q.add_argument("--treatment-cell")
+        q.add_argument(
+            "--artifact", nargs=2, metavar=("RUN", "PATH"), help="a run artifact holding the values"
+        )
+        q.add_argument("--reference-pointer", help="a/b/c path to the values inside the artifact")
+        q.add_argument("--treatment-pointer")
+        q.add_argument(
+            "--pairing",
+            choices=["PAIRED", "UNPAIRED", "UNKNOWN"],
+            help="default UNKNOWN (analyzed as UNPAIRED); interaction sources default to the design's",
+        )
+        q.add_argument("--estimator", choices=["mean", "median"])
+        q.add_argument("--method", choices=["percentile", "bca"])
+        q.add_argument("--confidence", type=float)
+        q.add_argument("--resamples", type=int)
+        q.add_argument("--seed", type=int)
+        sfmt(q)
+
+    p = st.add_parser(
+        "compare", help="treatment vs reference: effect sizes, permutation test, bootstrap CI"
+    )
+    ssource(p, treatment=True)
+    p.add_argument("--permutations", type=int)
+    p.set_defaults(func=_cmd_stats_compare)
+    p = st.add_parser(
+        "bootstrap",
+        help="deterministic bootstrap CI (percentile or BCa) of one sample, a paired or an unpaired difference",
+    )
+    ssource(p, treatment=False)
+    p.set_defaults(func=_cmd_stats_bootstrap)
+    p = st.add_parser(
+        "proportion",
+        help="Wilson interval for a count of successes (or a failure mode's prevalence)",
+    )
+    p.add_argument("--successes", type=int)
+    p.add_argument("--trials", type=int)
+    p.add_argument("--failure-mode", help="a failure mode ID (fmd_)")
+    p.add_argument("--confidence", type=float)
+    sfmt(p)
+    p.set_defaults(func=_cmd_stats_proportion)
+    p = st.add_parser(
+        "correct", help="explicit multiple-comparison correction over a named family of p-values"
+    )
+    p.add_argument("--p", action="append", default=[], metavar="NAME=P")
+    p.add_argument(
+        "--analysis", action="append", default=[], help="a registered COMPARE analysis (sta_)"
+    )
+    p.add_argument("--method", choices=["NONE", "BONFERRONI", "BENJAMINI_HOCHBERG"])
+    p.add_argument("--alpha", type=float)
+    sfmt(p)
+    p.set_defaults(func=_cmd_stats_correct)
+    p = st.add_parser("list", help="registered statistical analyses")
+    p.add_argument("--kind", choices=["COMPARE", "BOOTSTRAP", "PROPORTION", "CORRECTION"])
+    sfmt(p)
+    p.set_defaults(func=_cmd_stats_list)
+    p = st.add_parser("inspect", help="one analysis: settings, sources, result")
+    p.add_argument("id")
+    sfmt(p)
+    p.set_defaults(func=_cmd_stats_inspect)
+    p = st.add_parser(
+        "verify", help="recompute from the recorded sources; exit 1 unless reproduced"
+    )
+    p.add_argument("id")
+    sfmt(p)
+    p.set_defaults(func=_cmd_stats_verify)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

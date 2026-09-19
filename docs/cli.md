@@ -59,6 +59,8 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx benchmark list\|inspect\|coverage <bmk_…\|brs_…>` | search definitions; a definition or result with its section statuses; the coverage account |
 | `experionyx benchmark compare <brs_…> <brs_…>` | raw differences between two results of an identical protocol (refused otherwise; no winner) |
 | `experionyx benchmark replay <brs_…>` | replay the collect run as a new run and compare; exit 1 unless verified deterministic |
+| `experionyx stats compare\|bootstrap\|proportion\|correct …` | deterministic, recorded statistics over inline values, interaction trials, fault trials or run artifacts; see [statistics.md](statistics.md) |
+| `experionyx stats list\|inspect\|verify <sta_…>` | registered analyses; `verify` recomputes from the recorded sources and exits 1 unless reproduced |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
