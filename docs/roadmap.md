@@ -2,8 +2,8 @@
 
 **Provisional; subject to research findings. Not commitments.**
 
-0. Foundation (this phase)
-1. Domain model + experiment registry
+0. Foundation (done)
+1. Domain model + experiment registry (done)
 2. Execution engine + provenance
 3. Model adapter architecture
 4. Baseline evaluation / Model Autopsy

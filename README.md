@@ -2,8 +2,8 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 0 (foundation).** Only the project scaffold, tooling, documentation and a minimal
-> CLI exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
+> **Status: Phase 1 (domain model + registry).** The typed domain model and a local SQLite
+> experiment registry exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
 > implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -35,7 +35,12 @@ See [docs/architecture.md](docs/architecture.md) and
 
 - `src/` layout Python package `experionyx` (zero runtime dependencies)
 - `experionyx --version` and `experionyx info` (report real package/environment facts)
-- `ClaimStatus` and `EpistemicKind` enumerations encoding the methodology
+- Immutable, validated domain model: Investigation, Experiment, Run, Observation, Artifact,
+  Claim, Evidence, and content-addressed configuration/environment records
+  ([docs/domain-model.md](docs/domain-model.md))
+- Deterministic canonical hashing and IDs ([docs/identity.md](docs/identity.md))
+- Append-only registry protocol with a SQLite backend ([docs/registry.md](docs/registry.md));
+  it stores records, it does not yet execute experiments
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
 
 ## Hardware philosophy

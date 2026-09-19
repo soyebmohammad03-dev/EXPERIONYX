@@ -1,7 +1,9 @@
 # Architecture
 
-> **Current state:** Phase 0. Only the package skeleton, `domain` enums and a minimal CLI exist.
-> All subsystems below are **planned** and will be introduced incrementally.
+> **Current state:** Phase 1. Implemented: the domain model ([domain-model.md](domain-model.md)),
+> canonical hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite
+> backend ([registry.md](registry.md)), and a minimal CLI. Everything else below is **planned**
+> and will be introduced incrementally.
 
 ## Purpose and goals
 
@@ -29,7 +31,7 @@ flowchart TD
     APP --> PERSIST
 ```
 
-Only `domain` and `cli` exist today. No circular imports; no hidden global state.
+Today: `errors`, `validation`, `hashing` → `domain` → `registry` (protocol) → `sqlite`; `cli` is separate. No circular imports; no hidden global state.
 
 ## Domain concepts
 
