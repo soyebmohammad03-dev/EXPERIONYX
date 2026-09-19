@@ -22,6 +22,10 @@ from typing import cast
 
 import experionyx
 import experionyx.validation as v
+from experionyx.adapters.base import DatasetAdapter, ModelAdapter
+from experionyx.adapters.capabilities import DeviceInfo, DeviceKind
+from experionyx.adapters.records import RegisteredDataset, RegisteredModel
+from experionyx.adapters.registry import AdapterRegistries
 from experionyx.artifacts import ArtifactStore
 from experionyx.capture import (
     EnvironmentCapture,
@@ -44,14 +48,18 @@ from experionyx.domain import (
 )
 from experionyx.errors import (
     ArtifactError,
+    DatasetFingerprintError,
     ExperionyxError,
+    ModelFingerprintError,
     PreparationError,
     ReplayError,
 )
 from experionyx.provenance import (
+    AdapterInputs,
     ErrorInfo,
     ExecutionParameters,
     FailureStage,
+    InputBinding,
     Provenance,
     ResourceLimits,
     RunOutcome,
@@ -131,6 +139,9 @@ class RunContext:
     artifact_dir: Path  # write output files here, then register them
     project_root: Path
     recorder: _Recorder = field(repr=False, compare=False)
+    model: ModelAdapter | None = None  # loaded and fingerprint-verified, if the experiment has one
+    dataset: DatasetAdapter | None = None
+    device: DeviceInfo | None = None
 
     @property
     def parameters(self) -> Mapping[str, object]:
@@ -239,6 +250,16 @@ def run_states(registry: Registry, experiment_id: str | None = None) -> dict[Run
     return {s: [r for r in runs if r.status is s] for s in RunStatus}
 
 
+@dataclass(frozen=True)
+class _Bound:
+    """Adapters resolved for one run (all None for experiments without registered inputs)."""
+
+    inputs: AdapterInputs | None = None
+    model: ModelAdapter | None = None
+    dataset: DatasetAdapter | None = None
+    runtime: Mapping[str, object] = field(default_factory=dict)
+
+
 class Executor:
     def __init__(
         self,
@@ -247,9 +268,17 @@ class Executor:
         *,
         source_root: Path,
         clock: Clock = utc_now,
+        adapters: AdapterRegistries | None = None,
+        inputs_root: Path | None = None,
+        device: DeviceKind = DeviceKind.CPU,
     ) -> None:
+        """`adapters`: if given, registered models/datasets referenced by an experiment (a
+        ModelRef/DatasetRef with a digest) are resolved, loaded and verified before each run.
+        Relative `source` paths of registered inputs resolve against `inputs_root`.
+        `device`: default device policy (CPU unless changed)."""
         self._registry, self._store = registry, store
         self._source_root, self._clock = source_root, clock
+        self._adapters, self._inputs_root, self._device = adapters, inputs_root, device
 
     # -- public API ---------------------------------------------------------------------------
 
@@ -263,6 +292,7 @@ class Executor:
         resources: ResourceLimits | None = None,
         metadata: Mapping[str, object] | None = None,
         replay_of: str | None = None,
+        device: DeviceKind | None = None,
     ) -> ExecutionResult:
         """Run `procedure` as a new Run of the experiment. Never mutates earlier runs."""
         v.non_negative_int("seed", seed)
@@ -284,14 +314,20 @@ class Executor:
 
         run = self._create_run(experiment, capture, seed)
         logger.info("run %s created for experiment %s (seed %d)", run.id, experiment.id, seed)
+        try:
+            bound = self._bind_inputs(experiment, device or self._device)
+        except Exception as exc:
+            self._record_unstarted_failure(run, exc)
+            raise PreparationError(f"run {run.id}: cannot bind inputs: {exc}") from exc
         artifact_dir, provenance = self._start(
-            run, experiment, capture, source, seed, execution, replay_of
+            run, experiment, capture, source, seed, execution, replay_of, bound
         )
         running = run.with_status(RunStatus.RUNNING)
         recorder = _Recorder(self._registry, self._store, running, artifact_dir, self._clock)
         context = RunContext(
             experiment, running, configuration, seed, provenance.started_at, source,
             execution, artifact_dir, self._source_root, recorder,
+            bound.model, bound.dataset, bound.inputs.device if bound.inputs else None,
         )  # fmt: skip
 
         error: ErrorInfo | None = None
@@ -340,6 +376,7 @@ class Executor:
             resources=prov.execution.resources,
             metadata=prov.execution.metadata,
             replay_of=run_id,
+            device=prov.inputs.device.requested if prov.inputs and prov.inputs.device else None,
         )
 
     def recover_interrupted(self) -> list[Run]:
@@ -378,6 +415,104 @@ class Executor:
 
     # -- internals ----------------------------------------------------------------------------
 
+    def _source_path(self, source: str | None, what: str) -> str:
+        if source is None:
+            raise PreparationError(f"the registered {what} has no source to load from")
+        if source.startswith("builtin:") or Path(source).is_absolute() or self._inputs_root is None:
+            return source
+        return str(self._inputs_root / source)
+
+    def _bind_inputs(self, experiment: Experiment, device: DeviceKind) -> _Bound:
+        """Resolve, load and fingerprint-verify the experiment's registered model/dataset."""
+        if self._adapters is None:
+            return _Bound()
+        model = dataset = None
+        model_binding = dataset_binding = None
+        runtime: dict[str, object] = {}
+        if experiment.model.digest is not None and (loaded := self._load_model(experiment, device)):
+            model, model_binding = loaded
+            runtime["model_load_seconds"] = model.load_seconds
+        if experiment.dataset.digest is not None and (data := self._load_dataset(experiment)):
+            dataset, dataset_binding = data
+        if model_binding is None and dataset_binding is None:
+            return _Bound()
+        inputs = AdapterInputs(model_binding, dataset_binding, model.device if model else None)
+        return _Bound(inputs, model, dataset, runtime)
+
+    def _load_model(
+        self, experiment: Experiment, device: DeviceKind
+    ) -> tuple[ModelAdapter, InputBinding] | None:
+        """None if the ref has no registered record (an unbound external reference); a registered
+        model that fails to load or no longer matches its fingerprint is an error."""
+        assert self._adapters is not None  # noqa: S101  # guarded by _bind_inputs
+        ref = experiment.model
+        records = self._registry.find(
+            RegisteredModel, name=ref.name, version=ref.version, fingerprint=str(ref.digest)
+        )
+        if not records:
+            logger.warning(
+                "model %s %s is not registered; running without an adapter", ref.name, ref.version
+            )
+            return None
+        usable = []
+        for rec in records:
+            adapter_cls = self._adapters.models.resolve(rec.adapter)
+            if rec.adapter_version == adapter_cls.VERSION:
+                usable.append((rec, adapter_cls))
+        if not usable:
+            raise PreparationError(
+                f"model {ref.name} {ref.version} was registered with adapter version(s) "
+                f"{sorted(r.adapter_version for r in records)}, none of which is installed; "
+                "re-register it with the current adapter"
+            )
+        if len(usable) > 1:
+            raise PreparationError(f"model {ref.name} {ref.version} is registered ambiguously")
+        rec, adapter_cls = usable[0]
+        adapter = adapter_cls.load(
+            self._source_path(rec.source, "model"),
+            version=rec.version,
+            device=device,
+            options=rec.options,
+        )
+        if adapter.fingerprint() != rec.fingerprint:
+            raise ModelFingerprintError(
+                f"model {rec.name} {rec.version} has changed since registration: "
+                f"registered {rec.fingerprint}, found {adapter.fingerprint()}"
+            )
+        return adapter, InputBinding(rec.id, adapter_cls.NAME, adapter_cls.VERSION, rec.fingerprint)
+
+    def _load_dataset(self, experiment: Experiment) -> tuple[DatasetAdapter, InputBinding] | None:
+        assert self._adapters is not None  # noqa: S101
+        ref = experiment.dataset
+        records = self._registry.find(
+            RegisteredDataset, name=ref.name, version=ref.version, fingerprint=str(ref.digest)
+        )
+        if not records:
+            logger.warning(
+                "dataset %s %s is not registered; running without an adapter", ref.name, ref.version
+            )
+            return None
+        usable = []
+        for rec in records:
+            adapter_cls = self._adapters.datasets.resolve(rec.adapter)
+            if rec.adapter_version == adapter_cls.VERSION:
+                usable.append((rec, adapter_cls))
+        if len(usable) != 1:
+            raise PreparationError(
+                f"dataset {ref.name} {ref.version}: no unique registered record matches an "
+                "installed adapter version; re-register it with the current adapter"
+            )
+        rec, adapter_cls = usable[0]
+        adapter = adapter_cls.load(
+            self._source_path(rec.source, "dataset"), version=rec.version, options=rec.options
+        )
+        if adapter.fingerprint() != rec.fingerprint:
+            raise DatasetFingerprintError(
+                f"dataset {rec.name} {rec.version} has changed since registration: "
+                f"registered {rec.fingerprint}, found {adapter.fingerprint()}"
+            )
+        return adapter, InputBinding(rec.id, adapter_cls.NAME, adapter_cls.VERSION, rec.fingerprint)
+
     def _create_run(self, experiment: Experiment, capture: EnvironmentCapture, seed: int) -> Run:
         env = capture.snapshot
         with self._registry.transaction():
@@ -405,6 +540,7 @@ class Executor:
         seed: int,
         execution: ExecutionParameters,
         replay_of: str | None,
+        bound: _Bound,
     ) -> tuple[Path, Provenance]:
         try:
             artifact_dir = self._store.prepare(run)
@@ -419,8 +555,13 @@ class Executor:
                 executor_version=experionyx.__version__,
                 execution=execution,
                 started_at=self._clock(),
-                runtime={**capture.runtime, "dependency_issues": list(capture.dependency_issues)},
+                runtime={
+                    **capture.runtime,
+                    **bound.runtime,
+                    "dependency_issues": list(capture.dependency_issues),
+                },
                 replay_of=replay_of,
+                inputs=bound.inputs,
             )
             self._store.write_metadata(run, "provenance.json", _document(provenance))
             with self._registry.transaction():

@@ -4,8 +4,9 @@ Table and column names come only from the static `_SPECS` below; all values are 
 """
 
 import json
+import shutil
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -13,6 +14,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.domain import (
     EVIDENCE_TARGET_TYPES,
     Artifact,
@@ -40,7 +42,7 @@ from experionyx.hashing import canonical_json, content_hash
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 
-DB_SCHEMA_VERSION = 2  # stored in PRAGMA user_version; 2 added provenance + outcomes
+DB_SCHEMA_VERSION = 3  # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ class _Spec:
     plain: tuple[str, ...] = ()  # other indexed columns
     mutable: bool = False  # status may be updated
     optional: tuple[str, ...] = ()  # ref columns that may be NULL
+    since: int = 1  # schema version that introduced the table
 
     @property
     def columns(self) -> tuple[str, ...]:
@@ -85,8 +88,15 @@ _SPECS: dict[type[Entity], _Spec] = {
             ("replay_of", Run),
         ),
         optional=("replay_of",),
+        since=2,
     ),
-    RunOutcome: _Spec("outcomes", refs=(("run_id", Run),), plain=("status",)),
+    RunOutcome: _Spec("outcomes", refs=(("run_id", Run),), plain=("status",), since=2),
+    RegisteredModel: _Spec(
+        "models", plain=("name", "version", "adapter", "adapter_version", "fingerprint"), since=3
+    ),
+    RegisteredDataset: _Spec(
+        "datasets", plain=("name", "version", "adapter", "adapter_version", "fingerprint"), since=3
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -96,9 +106,21 @@ _SPECS: dict[type[Entity], _Spec] = {
 }
 
 
-def _ddl() -> str:
-    out = ["BEGIN;"]
+def _immutable_trigger(spec: _Spec) -> str:
+    guarded = ", ".join(("id", *(c for c, _ in spec.refs))) if spec.mutable else ""
+    of = f" OF {guarded}" if spec.mutable else ""
+    return (
+        f"CREATE TRIGGER {spec.table}_immutable BEFORE UPDATE{of} ON {spec.table} "
+        "BEGIN SELECT RAISE(ABORT, 'registry records are immutable'); END"
+    )
+
+
+def _ddl(upto: int = DB_SCHEMA_VERSION, since: int = 1) -> list[str]:
+    """Statements creating the tables introduced in schema versions since..upto."""
+    out: list[str] = []
     for spec in _SPECS.values():
+        if not since <= spec.since <= upto:
+            continue
         t = spec.table
         body = [
             "id TEXT PRIMARY KEY",
@@ -107,21 +129,60 @@ def _ddl() -> str:
             "content_hash TEXT NOT NULL",
             *(f"FOREIGN KEY ({c}) REFERENCES {_SPECS[e].table}(id)" for c, e in spec.refs),
         ]
-        out.append(f"CREATE TABLE {t} ({', '.join(body)});")
-        out.extend(f"CREATE INDEX ix_{t}_{c} ON {t}({c});" for c in spec.columns)
-        msg = "registry records cannot be deleted"
+        out.append(f"CREATE TABLE {t} ({', '.join(body)})")
+        out.extend(f"CREATE INDEX ix_{t}_{c} ON {t}({c})" for c in spec.columns)
         out.append(
             f"CREATE TRIGGER {t}_no_delete BEFORE DELETE ON {t} "
-            f"BEGIN SELECT RAISE(ABORT, '{msg}'); END;"
+            "BEGIN SELECT RAISE(ABORT, 'registry records cannot be deleted'); END"
         )
-        guarded = ", ".join(("id", *(c for c, _ in spec.refs))) if spec.mutable else ""
-        of = f" OF {guarded}" if spec.mutable else ""
-        out.append(
-            f"CREATE TRIGGER {t}_immutable BEFORE UPDATE{of} ON {t} "
-            "BEGIN SELECT RAISE(ABORT, 'registry records are immutable'); END;"
+        out.append(_immutable_trigger(spec))
+    return out
+
+
+def _rewrite_payloads(
+    conn: sqlite3.Connection, cls: type[Entity], fn: Callable[[dict[str, object]], None]
+) -> None:
+    """Migration helper: rewrite every stored payload of `cls` in place (IDs are unchanged, the
+    content hash is recomputed). Lifts the immutability trigger only for the duration."""
+    spec = _SPECS[cls]
+    conn.execute(f"DROP TRIGGER {spec.table}_immutable")
+    for row_id, payload in conn.execute(f"SELECT id, payload FROM {spec.table}").fetchall():  # noqa: S608
+        data = json.loads(payload)
+        fn(data)
+        conn.execute(
+            f"UPDATE {spec.table} SET payload = ?, content_hash = ? WHERE id = ?",  # noqa: S608
+            (canonical_json(data), content_hash(data), row_id),
         )
-    out += [f"PRAGMA user_version = {DB_SCHEMA_VERSION};", "COMMIT;"]
-    return "\n".join(out)
+    conn.execute(_immutable_trigger(spec))
+
+
+def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
+    """Phase 2: add provenance/outcomes; artifacts gain `name` (= their path) and `category`."""
+    for statement in _ddl(upto=2, since=2):
+        conn.execute(statement)
+
+    def artifact(data: dict[str, object]) -> None:
+        data.setdefault("name", data["path"])  # v1 had no logical name; the path is all we know
+        data.setdefault("category", "OUTPUT")
+
+    _rewrite_payloads(conn, Artifact, artifact)
+
+
+def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
+    """Phase 3: add model/dataset records; provenance gains `inputs` (null for existing runs)."""
+    for statement in _ddl(upto=3, since=3):
+        conn.execute(statement)
+
+    def provenance(data: dict[str, object]) -> None:
+        data.setdefault("inputs", None)
+
+    _rewrite_payloads(conn, Provenance, provenance)
+
+
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    1: _migrate_1_to_2,
+    2: _migrate_2_to_3,
+}
 
 
 def _column_value(entity: Entity, column: str) -> str | None:
@@ -142,24 +203,50 @@ class SqliteRegistry:
         self._depth = 0
         try:
             self._conn.execute("PRAGMA foreign_keys = ON")
-            self._init_schema()
+            self._init_schema(path)
         except Exception:
             self._conn.close()
             raise
 
-    def _init_schema(self) -> None:
+    def _init_schema(self, path: str | Path) -> None:
         (found,) = self._conn.execute("PRAGMA user_version").fetchone()
+        if found == DB_SCHEMA_VERSION:
+            return
         if found == 0:
             (tables,) = self._conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
             if tables:
                 raise SchemaVersionError(
                     "database is non-empty but has no EXPERIONYX schema version"
                 )
-            self._conn.executescript(_ddl())
-        elif found != DB_SCHEMA_VERSION:
+            self._run_atomically(lambda: [self._conn.execute(s) for s in _ddl()], DB_SCHEMA_VERSION)
+        elif found in _MIGRATIONS:
+            self._migrate(found, path)
+        else:
             raise SchemaVersionError(
-                f"unsupported database schema version {found} (supported: {DB_SCHEMA_VERSION})"
+                f"unsupported database schema version {found} (supported: 1..{DB_SCHEMA_VERSION})"
             )
+
+    def _run_atomically(self, work: Callable[[], object], version: int) -> None:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            work()
+            self._conn.execute(f"PRAGMA user_version = {version}")
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
+    def _migrate(self, found: int, path: str | Path) -> None:
+        """Upgrade one version at a time inside a single transaction: all steps or none. A file
+        database is copied to `<name>.v<found>.bak` first."""
+        if str(path) != ":memory:":
+            shutil.copy2(path, Path(path).with_name(f"{Path(path).name}.v{found}.bak"))
+
+        def steps() -> None:
+            for version in range(found, DB_SCHEMA_VERSION):
+                _MIGRATIONS[version](self._conn)
+
+        self._run_atomically(steps, DB_SCHEMA_VERSION)
 
     # -- Registry protocol --------------------------------------------------------------------
 
@@ -202,6 +289,8 @@ class SqliteRegistry:
                 self._check_provenance(entity)
             elif isinstance(entity, RunOutcome):
                 self._check_outcome(entity)
+            elif isinstance(entity, RegisteredModel | RegisteredDataset):
+                self._check_unique_binding(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -232,6 +321,37 @@ class SqliteRegistry:
             and self.get(Run, p.replay_of).experiment_id != run.experiment_id
         ):
             raise ValidationError("a replay must belong to the same experiment as its original")
+        if p.inputs is not None:
+            if p.inputs.model is not None:
+                model = self.get(RegisteredModel, p.inputs.model.record_id)
+                self._check_binding(p.inputs.model.fingerprint, exp.model.digest, model.fingerprint)
+            if p.inputs.dataset is not None:
+                data = self.get(RegisteredDataset, p.inputs.dataset.record_id)
+                self._check_binding(
+                    p.inputs.dataset.fingerprint, exp.dataset.digest, data.fingerprint
+                )
+
+    @staticmethod
+    def _check_binding(bound: str, referenced: str | None, registered: str) -> None:
+        if bound != registered or referenced != registered:
+            raise ValidationError(
+                "provenance input does not match the experiment's registered reference"
+            )
+
+    def _check_unique_binding(self, record: RegisteredModel | RegisteredDataset) -> None:
+        """A (name, version) may only ever refer to one fingerprint per adapter version."""
+        clashes = [
+            r
+            for r in self.find(type(record), name=record.name, version=record.version)
+            if r.adapter == record.adapter
+            and r.adapter_version == record.adapter_version
+            and r.fingerprint != record.fingerprint
+        ]
+        if clashes:
+            raise ValidationError(
+                f"{record.name} {record.version} is already registered with a different "
+                "fingerprint; use a new version for changed content"
+            )
 
     def _check_outcome(self, o: RunOutcome) -> None:
         run = self.get(Run, o.run_id)

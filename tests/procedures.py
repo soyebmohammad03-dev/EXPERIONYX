@@ -45,3 +45,17 @@ def interrupted(ctx: RunContext) -> None:
 
 def nothing(ctx: RunContext) -> None:
     return None
+
+
+def adapter_eval(ctx: RunContext) -> None:
+    """Uses whatever registered model/dataset the executor bound to the run."""
+    assert ctx.model is not None
+    assert ctx.dataset is not None
+    predictions: list[object] = []
+    for batch in ctx.dataset.batches(4, "test"):
+        result = ctx.model.predict(batch.inputs, sample_ids=batch.indices)
+        predictions.extend(result.outputs)
+        ctx.observe("batch_seconds", result.inference_seconds, unit="s")
+    ctx.observe("n_predictions", len(predictions))
+    (ctx.artifact_dir / "predictions.txt").write_text(repr(predictions), encoding="utf-8")
+    ctx.register_artifact("predictions.txt", name="predictions")

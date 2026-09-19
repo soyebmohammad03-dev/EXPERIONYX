@@ -51,3 +51,55 @@ class ArtifactIntegrityError(ArtifactError):
 
 class ConcurrentModificationError(ExperionyxError):
     """A record changed between read and write."""
+
+
+class AdapterError(ExperionyxError):
+    """Base class for model/dataset adapter failures. Framework exceptions are chained as causes."""
+
+
+class AdapterNotFoundError(AdapterError, LookupError):
+    """No adapter is registered under the requested name."""
+
+
+class DuplicateAdapterError(AdapterError):
+    """An adapter with this name is already registered."""
+
+
+class AdapterUnavailableError(AdapterError):
+    """The adapter is registered but its framework (an optional extra) is not installed."""
+
+
+class UnsupportedCapabilityError(AdapterError):
+    """The requested operation is not among the adapter's capabilities."""
+
+
+class DeviceUnavailableError(AdapterError):
+    """A specifically requested device is not available; there is no silent fallback."""
+
+
+class ModelLoadError(AdapterError):
+    """A model artifact could not be loaded."""
+
+
+class DatasetLoadError(AdapterError):
+    """A dataset could not be loaded."""
+
+
+class InvalidModelError(AdapterError):
+    """The loaded object is not a model this adapter can drive."""
+
+
+class InvalidDatasetError(AdapterError):
+    """The dataset is malformed or unsupported by this adapter."""
+
+
+class ModelFingerprintError(AdapterError):
+    """A model fingerprint could not be computed or no longer matches its registration."""
+
+
+class DatasetFingerprintError(AdapterError):
+    """A dataset fingerprint could not be computed or no longer matches its registration."""
+
+
+class InferenceError(AdapterError):
+    """Inference failed or was given invalid inputs."""

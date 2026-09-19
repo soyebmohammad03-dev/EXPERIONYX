@@ -4,12 +4,12 @@
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,sklearn,torch]"
 ```
 
 | Task | Command |
 |---|---|
-| Test | `pytest` |
+| Test | `pytest` (ML adapter tests skip themselves if sklearn/torch are missing) |
 | Lint | `ruff check .` |
 | Format | `ruff format .` (check: `ruff format --check .`) |
 | Type check | `mypy` |

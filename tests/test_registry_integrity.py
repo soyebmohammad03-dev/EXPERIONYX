@@ -270,12 +270,12 @@ def test_replay_of_column_is_nullable_and_queryable(stage: tuple[Lab, Run]) -> N
 # --- schema versions --------------------------------------------------------------------------
 
 
-def test_phase1_databases_are_rejected_with_a_clear_message(tmp_path: Path) -> None:
-    path = tmp_path / "old.sqlite"
-    with sqlite3.connect(path) as raw:
-        raw.execute("PRAGMA user_version = 1")
-    with pytest.raises(SchemaVersionError, match="version 1"):
-        SqliteRegistry(path)
+def test_unversioned_or_future_databases_are_rejected(tmp_path: Path) -> None:
+    future = tmp_path / "future.sqlite"
+    with sqlite3.connect(future) as raw:
+        raw.execute("PRAGMA user_version = 99")
+    with pytest.raises(SchemaVersionError, match="99"):
+        SqliteRegistry(future)
 
 
 def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
@@ -283,6 +283,14 @@ def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
     SqliteRegistry(path).close()
     with sqlite3.connect(path) as raw:
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == 2
-    assert {"provenance", "outcomes", "runs", "artifacts", "observations"} <= tables
-    assert "CREATE TABLE provenance" in _ddl()
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert {
+        "provenance",
+        "outcomes",
+        "runs",
+        "artifacts",
+        "observations",
+        "models",
+        "datasets",
+    } <= tables
+    assert any(x.startswith("CREATE TABLE provenance") for x in _ddl())

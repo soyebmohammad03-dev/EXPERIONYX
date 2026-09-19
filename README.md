@@ -2,8 +2,9 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 2 (execution + provenance).** The typed domain model, a local SQLite registry,
-> and an execution engine that records provenance and artifact digests exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
+> **Status: Phase 3 (model + dataset adapters).** The typed domain model, a local SQLite registry,
+> an execution engine that records provenance and artifact digests, and framework-agnostic model and
+> dataset adapters (concrete: scikit-learn and PyTorch) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
 > implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -45,6 +46,11 @@ See [docs/architecture.md](docs/architecture.md) and
   Run, captures environment/source/seed/configuration ([docs/provenance.md](docs/provenance.md)),
   hashes artifacts ([docs/artifacts.md](docs/artifacts.md)), records failures, and can request
   replays as new runs. Replay is not reproduction verification.
+- Adapter layer ([docs/adapters.md](docs/adapters.md)): explicit typed capabilities, model/dataset
+  identity and fingerprints ([docs/model-dataset-identity.md](docs/model-dataset-identity.md)),
+  registered models/datasets verified before every run and recorded in provenance, contract
+  tests every adapter must pass. sklearn and PyTorch are the *initial* integrations, optional
+  extras; the core imports neither.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
@@ -56,11 +62,12 @@ resumable and bounded-parallel execution. No paid APIs, GPUs or clusters in the 
 
 ## Development
 
-Requires Python 3.11+.
+Requires Python 3.11+. The core has no runtime dependencies; frameworks are extras:
+`pip install -e ".[sklearn]"`, `".[torch]"` (add `dev` for the test tools).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,sklearn,torch]"
 pytest && ruff check . && ruff format --check . && mypy
 ```
 

@@ -96,5 +96,14 @@ global RNG if NumPy is installed, and the libraries seeded are recorded in prove
 deterministic**: threads, hash randomization (`PYTHONHASHSEED`), hardware, and ML frameworks are
 outside its reach, and future model adapters own framework-specific determinism.
 
+## Adapter-backed runs
+With `Executor(adapters=default_registries(), inputs_root=workspace)`, a `ModelRef`/`DatasetRef`
+with a digest that matches a registered model/dataset is resolved to its adapter, loaded and
+fingerprint-verified **before** the run starts; the procedure receives `ctx.model`, `ctx.dataset`
+and `ctx.device`. Load failures, fingerprint mismatches and stale adapter versions fail the run in
+the PREPARATION stage. See [adapters.md](adapters.md) and
+[model-dataset-identity.md](model-dataset-identity.md). The executor depends only on the adapter
+*protocols*, never on a framework.
+
 ## Not done here
 Resource limits are recorded, not enforced. No timeouts, no process isolation, no scheduler.

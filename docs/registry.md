@@ -33,13 +33,14 @@ updates are compare-and-swap. Single connection per object, one thread; concurre
 serialize on the SQLite lock. See [execution.md](execution.md#concurrency).
 
 ## Schema versioning
-`PRAGMA user_version` holds `DB_SCHEMA_VERSION` (currently 2; version 2 added the `provenance` and
-`outcomes` tables and changed `Artifact`/`Observation` payloads). Version-1 (Phase 1) databases are
-rejected: there is no migration path yet and no data was ever published. A new database is initialized
-atomically; a matching version opens; any other version, or a non-empty database with no version,
-raises `SchemaVersionError`. Payloads carry their own `schema_version`, so record format and table
-layout can evolve independently. No migrations exist yet.
-
-## Limitations
-No migrations. Not a reproducibility guarantee by itself: it stores what the execution engine
-and callers report.
+`PRAGMA user_version` holds `DB_SCHEMA_VERSION` (currently 3): v2 added `provenance`/`outcomes`
+(and gave artifacts a name and category), v3 added `models`/`datasets` (and `inputs` on
+provenance).  A new database is created at the latest version. An older database is **migrated in place**,
+one version at a time inside a single transaction (all steps or none), after copying the file to
+`<name>.v<old>.bak` (in-memory databases are not backed up). Steps are explicit functions in
+`sqlite.py` (`_migrate_1_to_2`, `_migrate_2_to_3`); payload rewrites keep record IDs and
+recompute content hashes, and migrated records keep their immutability triggers. Migrated data
+is only as rich as the old data: v1 artifacts get `name = path` and category OUTPUT, and old
+provenance gets `inputs = null` (its fingerprint is unchanged by design). A newer version, or a
+non-empty database with no version, raises `SchemaVersionError`. Migration tests build real v1
+and v2 databases.

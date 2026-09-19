@@ -6,10 +6,15 @@ import logging
 import platform
 import sys
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 from experionyx import __version__
+from experionyx.adapters.capabilities import DeviceKind
+from experionyx.adapters.records import RegisteredDataset, RegisteredModel
+from experionyx.adapters.registry import default_registries
 from experionyx.artifacts import LocalArtifactStore
+from experionyx.demos import DEMOS, run_demo
 from experionyx.domain import (
     Artifact,
     ConfigurationRef,
@@ -19,6 +24,7 @@ from experionyx.domain import (
     Observation,
     Run,
     RunStatus,
+    to_jsonable,
 )
 from experionyx.errors import ArtifactIntegrityError, ExperionyxError
 from experionyx.execution import ExecutionResult, Executor, resolve_procedure, run_states
@@ -28,6 +34,13 @@ from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 DEFAULT_WORKSPACE = ".experionyx"
 REGISTRY_FILE = "registry.sqlite"
 EXPERIMENTS_DIR = "experiments"
+
+
+def _json(value: object) -> dict[str, object]:
+    data = to_jsonable(value)
+    if not isinstance(data, dict):
+        raise TypeError(f"{type(value).__name__} is not a dataclass")
+    return data
 
 
 def _record(entity: Entity) -> dict[str, object]:
@@ -47,7 +60,13 @@ def _open(workspace: str) -> SqliteRegistry:
 
 def _executor(registry: SqliteRegistry, workspace: str) -> Executor:
     store = LocalArtifactStore(Path(workspace) / EXPERIMENTS_DIR)
-    return Executor(registry, store, source_root=Path.cwd())
+    return Executor(
+        registry,
+        store,
+        source_root=Path.cwd(),
+        adapters=default_registries(entry_points=True),
+        inputs_root=Path(workspace),
+    )
 
 
 def _cmd_info(_: argparse.Namespace) -> int:
@@ -128,6 +147,124 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+def _options(pairs: list[str]) -> dict[str, object]:
+    """`--option key=value` (value parsed as JSON when possible, else kept as a string)."""
+    out: dict[str, object] = {}
+    for pair in pairs:
+        key, sep, raw = pair.partition("=")
+        if not (key and sep):
+            raise ExperionyxError(f"--option expects key=value, got {pair!r}")
+        try:
+            out[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            out[key] = raw
+    return out
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    Path(args.workspace).mkdir(parents=True, exist_ok=True)
+    SqliteRegistry(Path(args.workspace) / REGISTRY_FILE).close()
+    print(f"workspace ready: {args.workspace}")
+    return 0
+
+
+def _cmd_adapters_list(_: argparse.Namespace) -> int:
+    registries = default_registries(entry_points=True)
+    for kind, registry in (("model", registries.models), ("dataset", registries.datasets)):
+        for status in registry.status():
+            if status.info is None:
+                print(f"{kind:8} {status.name:10} UNAVAILABLE  {status.reason}")
+            else:
+                i = status.info
+                print(
+                    f"{kind:8} {i.name:10} {i.version:8} {i.framework:14} "
+                    + ",".join(i.capabilities)
+                )
+    return 0
+
+
+def _cmd_adapters_inspect(args: argparse.Namespace) -> int:
+    registries = default_registries(entry_points=True)
+    found: dict[str, object] = {}
+    for kind, registry in (("model", registries.models), ("dataset", registries.datasets)):
+        for status in registry.status():
+            if status.name == args.name:
+                found[kind] = (
+                    {"available": False, "reason": status.reason}
+                    if status.info is None
+                    else {"available": True, **_json(status.info)}
+                )
+    if not found:
+        raise ExperionyxError(f"no adapter named {args.name!r}")
+    _dump(found)
+    return 0
+
+
+def _cmd_model_inspect(args: argparse.Namespace) -> int:
+    if args.target.startswith("mdl_"):
+        with _open(args.workspace) as reg:
+            _dump(_record(reg.get(RegisteredModel, args.target)))
+        return 0
+    adapter_cls = default_registries(entry_points=True).models.resolve(_need_adapter(args))
+    adapter = adapter_cls.load(
+        args.target,
+        version=args.version,
+        device=DeviceKind(args.device),
+        options=_options(args.option),
+    )
+    _dump({"device": _json(adapter.device), "load_seconds": adapter.load_seconds,
+           "metadata": _json(adapter.metadata())})  # fmt: skip
+    return 0
+
+
+def _cmd_model_register(args: argparse.Namespace) -> int:
+    options = _options(args.option)
+    adapter_cls = default_registries(entry_points=True).models.resolve(args.adapter)
+    adapter = adapter_cls.load(
+        args.source, version=args.version, device=DeviceKind.CPU, options=options
+    )
+    record = RegisteredModel(args.name, adapter.metadata(), datetime.now(UTC), args.source, options)
+    with _open(args.workspace) as reg:
+        reg.add(record)
+    print(f"registered model {record.id}\nfingerprint: {record.fingerprint}")
+    return 0
+
+
+def _cmd_dataset_inspect(args: argparse.Namespace) -> int:
+    if args.target.startswith("dst_"):
+        with _open(args.workspace) as reg:
+            _dump(_record(reg.get(RegisteredDataset, args.target)))
+        return 0
+    adapter_cls = default_registries(entry_points=True).datasets.resolve(_need_adapter(args))
+    adapter = adapter_cls.load(args.target, version=args.version, options=_options(args.option))
+    _dump(_json(adapter.metadata(deep=args.deep)))
+    return 0
+
+
+def _cmd_dataset_register(args: argparse.Namespace) -> int:
+    options = _options(args.option)
+    adapter_cls = default_registries(entry_points=True).datasets.resolve(args.adapter)
+    adapter = adapter_cls.load(args.source, version=args.version, options=options)
+    record = RegisteredDataset(
+        args.name, adapter.metadata(), datetime.now(UTC), args.source, options
+    )
+    with _open(args.workspace) as reg:
+        reg.add(record)
+    print(f"registered dataset {record.id}\nfingerprint: {record.fingerprint}")
+    return 0
+
+
+def _need_adapter(args: argparse.Namespace) -> str:
+    if not args.adapter:
+        raise ExperionyxError("--adapter is required unless inspecting a registered ID")
+    return str(args.adapter)
+
+
+def _cmd_demo(args: argparse.Namespace) -> int:
+    Path(args.workspace).mkdir(parents=True, exist_ok=True)
+    return _report(run_demo(args.name, Path(args.workspace), args.seed))
+
+
 def _report(result: ExecutionResult) -> int:
     print(f"run: {result.run.id}")
     print(f"status: {result.status}")
@@ -202,6 +339,59 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id", help="run ID")
     p.add_argument("--procedure", help="override the recorded procedure ('module:function')")
     add("recover", _cmd_recover, "mark RUNNING runs whose process has ended as FAILED")
+    add("init", _cmd_init, "create an empty workspace registry")
+    p = add("demo", _cmd_demo, "train, register and execute a small real adapter-backed experiment")
+    p.add_argument("name", choices=DEMOS)
+    p.add_argument("--seed", type=int, default=0)
+
+    def group(name: str, help_: str) -> "argparse._SubParsersAction[argparse.ArgumentParser]":
+        return sub.add_parser(name, help=help_).add_subparsers(
+            dest=f"{name}_command", required=True
+        )
+
+    def loader_args(p: argparse.ArgumentParser, *, model: bool) -> None:
+        p.add_argument(
+            "--adapter", help="adapter name (required unless inspecting a registered ID)"
+        )
+        p.add_argument("--version", default="1", help="version to record (default 1)")
+        p.add_argument("--option", action="append", default=[], help="adapter option key=value")
+        if model:
+            p.add_argument("--device", default="CPU", choices=[d.value for d in DeviceKind])
+
+    adapters = group("adapters", "list and inspect model/dataset adapters")
+    adapters.add_parser("list", help="list adapters and their capabilities").set_defaults(
+        func=_cmd_adapters_list
+    )
+    p = adapters.add_parser("inspect", help="show one adapter's details")
+    p.add_argument("name")
+    p.set_defaults(func=_cmd_adapters_inspect)
+
+    models = group("model", "inspect or register a model")
+    p = models.add_parser("inspect", help="inspect a registered model ID or load a file")
+    p.add_argument("target", help="model ID (mdl_...) or a source path")
+    loader_args(p, model=True)
+    p.set_defaults(func=_cmd_model_inspect)
+    p = models.add_parser("register", help="load a model artifact and register it")
+    p.add_argument("--name", required=True)
+    p.add_argument("--source", required=True)
+    p.add_argument("--adapter", required=True)
+    p.add_argument("--version", default="1")
+    p.add_argument("--option", action="append", default=[])
+    p.set_defaults(func=_cmd_model_register)
+
+    datasets = group("dataset", "inspect or register a dataset")
+    p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")
+    p.add_argument("target", help="dataset ID (dst_...) or a source (path or builtin:name)")
+    loader_args(p, model=False)
+    p.add_argument("--deep", action="store_true", help="also compute expensive statistics")
+    p.set_defaults(func=_cmd_dataset_inspect)
+    p = datasets.add_parser("register", help="load a dataset and register it")
+    p.add_argument("--name", required=True)
+    p.add_argument("--source", required=True)
+    p.add_argument("--adapter", required=True)
+    p.add_argument("--version", default="1")
+    p.add_argument("--option", action="append", default=[])
+    p.set_defaults(func=_cmd_dataset_register)
     return parser
 
 

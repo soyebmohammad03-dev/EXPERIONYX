@@ -16,6 +16,7 @@ entities (`src/experionyx/provenance.py`); capture code lives in `src/experionyx
 | `execution` | procedure import path, advisory resource limits, `metadata` | yes |
 | `run_id`, `started_at` | identity/time of this execution | no |
 | `replay_of` | original run, if this is a replay | no |
+| `inputs` | for adapter-backed runs: bound model/dataset (record ID, adapter, adapter version, fingerprint measured at load) and requested/resolved device | yes, when present |
 | `runtime` | informational: Python implementation, processor, CPU count, pid, seeded libraries, dependency issues | no |
 
 Artifacts and observations are referenced from the registry by `run_id`; the outcome lists

@@ -12,6 +12,7 @@ from enum import StrEnum
 from typing import ClassVar, Self
 
 import experionyx.validation as v
+from experionyx.adapters.capabilities import DeviceInfo, DeviceKind
 from experionyx.domain import (
     Artifact,
     ConfigurationRef,
@@ -120,6 +121,71 @@ class ExecutionParameters:
         )
 
 
+@dataclass(frozen=True)
+class InputBinding:
+    """A registered model or dataset as actually loaded for a run. `fingerprint` was re-measured
+    at load time and verified against the registered one."""
+
+    record_id: str  # RegisteredModel / RegisteredDataset ID
+    adapter: str
+    adapter_version: str
+    fingerprint: str
+
+    def __post_init__(self) -> None:
+        v.text("record_id", self.record_id)
+        v.text("adapter", self.adapter)
+        v.version("adapter_version", self.adapter_version)
+        v.digest("fingerprint", self.fingerprint)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> Self:
+        check_keys(d, ("record_id", "adapter", "adapter_version", "fingerprint"))
+        return cls(
+            v.get_str(d, "record_id"),
+            v.get_str(d, "adapter"),
+            v.get_str(d, "adapter_version"),
+            v.get_str(d, "fingerprint"),
+        )
+
+
+@dataclass(frozen=True)
+class AdapterInputs:
+    """Which model/dataset (via adapters) a run investigated, and on which device."""
+
+    model: InputBinding | None = None
+    dataset: InputBinding | None = None
+    device: DeviceInfo | None = None
+
+    def __post_init__(self) -> None:
+        if self.model is not None:
+            v.member("model", self.model, InputBinding)
+            v.ref("model.record_id", self.model.record_id, "mdl")
+        if self.dataset is not None:
+            v.member("dataset", self.dataset, InputBinding)
+            v.ref("dataset.record_id", self.dataset.record_id, "dst")
+        if self.device is not None:
+            v.member("device", self.device, DeviceInfo)
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> Self:
+        check_keys(d, ("model", "dataset", "device"))
+
+        def binding(key: str) -> InputBinding | None:
+            return (
+                None if v.get_raw(d, key) is None else InputBinding.from_dict(v.get_mapping(d, key))
+            )
+
+        device = v.get_raw(d, "device")
+        info = None
+        if device is not None:
+            dm = v.get_mapping(d, "device")
+            check_keys(dm, ("requested", "resolved"))
+            info = DeviceInfo(
+                v.get_enum(dm, "requested", DeviceKind), v.get_enum(dm, "resolved", DeviceKind)
+            )
+        return cls(binding("model"), binding("dataset"), info)
+
+
 class FailureStage(StrEnum):
     PREPARATION = "PREPARATION"  # failed before the procedure started
     EXECUTION = "EXECUTION"  # the procedure raised
@@ -175,6 +241,7 @@ class Provenance(Entity):
     started_at: datetime
     runtime: Mapping[str, object] = field(default_factory=dict)  # informational only
     replay_of: str | None = None  # set => this run is a REPLAY_REQUESTED of that run
+    inputs: AdapterInputs | None = None  # registered model/dataset bindings, if adapter-backed
 
     def __post_init__(self) -> None:
         v.ref("run_id", self.run_id, Run.PREFIX)
@@ -188,6 +255,8 @@ class Provenance(Entity):
         v.member("execution", self.execution, ExecutionParameters)
         v.timestamp("started_at", self.started_at)
         object.__setattr__(self, "runtime", v.freeze_mapping("runtime", self.runtime))
+        if self.inputs is not None:
+            v.member("inputs", self.inputs, AdapterInputs)
         if self.replay_of is not None:
             v.ref("replay_of", self.replay_of, Run.PREFIX)
             if self.replay_of == self.run_id:
@@ -199,7 +268,7 @@ class Provenance(Entity):
 
     def components(self) -> dict[str, object]:
         """The reproducibility-relevant inputs, by name. Basis of `fingerprint`."""
-        return {
+        parts: dict[str, object] = {
             "experiment": self.experiment_id,
             "source": {"state": self.source.state.value, "commit": self.source.commit},
             "environment": self.environment_id,
@@ -209,6 +278,9 @@ class Provenance(Entity):
             "executor": self.executor_version,
             "execution": to_jsonable(self.execution),
         }
+        if self.inputs is not None:  # absent for non-adapter runs: their fingerprints are unchanged
+            parts["inputs"] = to_jsonable(self.inputs)
+        return parts
 
     @property
     def fingerprint(self) -> str:
@@ -235,8 +307,10 @@ class Provenance(Entity):
                 "started_at",
                 "runtime",
                 "replay_of",
+                "inputs",
             ),
         )
+        inputs = v.get_raw(d, "inputs")
         return cls(
             run_id=v.get_str(d, "run_id"),
             experiment_id=v.get_str(d, "experiment_id"),
@@ -250,13 +324,14 @@ class Provenance(Entity):
             started_at=v.get_time(d, "started_at"),
             runtime=v.get_mapping(d, "runtime"),
             replay_of=v.get_opt_str(d, "replay_of"),
+            inputs=None if inputs is None else AdapterInputs.from_dict(v.get_mapping(d, "inputs")),
         )
 
 
 def compare_provenance(a: Provenance, b: Provenance) -> tuple[str, ...]:
     """Names of the reproducibility-relevant components that differ (empty => same fingerprint)."""
     ca, cb = a.components(), b.components()
-    return tuple(k for k in ca if ca[k] != cb[k])
+    return tuple(k for k in (*ca, *(k for k in cb if k not in ca)) if ca.get(k) != cb.get(k))
 
 
 @dataclass(frozen=True)
@@ -366,10 +441,12 @@ def config_diff(a: ConfigurationRef, b: ConfigurationRef) -> ConfigDiff:
 
 
 __all__ = [
+    "AdapterInputs",
     "ConfigDiff",
     "ErrorInfo",
     "ExecutionParameters",
     "FailureStage",
+    "InputBinding",
     "Provenance",
     "ResourceLimits",
     "RunOutcome",

@@ -16,6 +16,7 @@ prefix). Mapping/list fields are deep-copied into read-only structures.
 | `Artifact` | Metadata of a file a run produced (name, category, path, sha256, size, media type) | run, path, digest |
 | `Provenance` | Inputs/context of a run: environment, dependencies, source, config, seed, execution (see [provenance.md](provenance.md)) | run |
 | `RunOutcome` | How a run ended: status, duration, structured error, artifact IDs, observation count | run |
+| `RegisteredModel` / `RegisteredDataset` | Model/dataset identity: name, version, adapter (+version), fingerprint, source, load options, standardized metadata (see [model-dataset-identity.md](model-dataset-identity.md)) | name, version, adapter, adapter version, fingerprint, options |
 | `Claim` | Statement in an investigation, with `asserted_by` and a `ClaimStatus` | investigation, statement |
 | `Evidence` | Links a claim to an experiment/run/observation/artifact as SUPPORTS/REFUTES/CONTEXT | claim, target kind, target, relation |
 

@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import os
 import random
@@ -78,7 +79,12 @@ def test_successful_execution_leaves_a_complete_durable_record(lab: Lab) -> None
     assert prov.execution.procedure == "procedures:ok"
     assert prov.source.state is SourceState.UNKNOWN  # source root is not a git repo
     assert prov.replay_of is None
-    assert prov.runtime["seeded_libraries"] == ("python.random",)  # frozen: lists become tuples
+    expected_seeded = (
+        ("python.random", "numpy.random")
+        if importlib.util.find_spec("numpy")
+        else ("python.random",)
+    )
+    assert prov.runtime["seeded_libraries"] == expected_seeded  # frozen: lists become tuples
 
     obs = {o.name: o for o in reg.find(Observation, run_id=run.id)}
     assert obs["score"].value == 2.0
