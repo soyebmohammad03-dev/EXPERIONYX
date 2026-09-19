@@ -67,6 +67,12 @@ CONFIRMED_BY_REVIEW`, plus `REJECTED`/`DEPRECATED`), `InteractionEffect` (`ief_`
 `InteractionEvidence` (`iev_`) are immutable and content-addressed; only the analysis status is
 mutable. See [interactions.md](interactions.md).
 
+## Reliability records (Phase 8)
+
+`ReliabilityProfile` (`rpf_`) and `ReliabilityReference` (`rrf_`) are immutable and content-addressed.
+A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
+artifact. See [reliability.md](reliability.md).
+
 ## Observation kinds
 `Observation.epistemic_kind` is `OBSERVATION` or `DERIVED_METRIC` (never interpretation or
 hypothesis), following [methodology.md](methodology.md).

@@ -2,11 +2,11 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 7 (fault interaction analysis).** The typed domain model, a local SQLite registry,
+> **Status: Phase 8 (reliability profiles).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
-> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. A rigorous fault interaction analysis engine (four-cell additive contrast, trial-level bootstrap, order effects, per-sample and failure-mode analysis) exists. Drift, general statistics and reports are
+> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. A rigorous fault interaction analysis engine (four-cell additive contrast, trial-level bootstrap, order effects, per-sample and failure-mode analysis) exists. Evidence-first reliability profiles summarize what has been observed about an evaluated system without a score or ranking. Drift, general statistics and reports are
 > not implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -75,6 +75,11 @@ See [docs/architecture.md](docs/architecture.md) and
   effects, verified per-sample alignment, failure-mode comparison, a lifecycle needing an
   independent replicate and a human decision, and deterministic replay. It reports observed
   contrasts; it never claims that one fault causes another.
+- Reliability profiles ([docs/reliability.md](docs/reliability.md)): an evidence-first summary of one
+  evaluated model/dataset/configuration across ten dimensions (baseline, fault, failure prevalence and
+  severity, interaction, slice, reproducibility, uncertainty, latency, calibration), each with an explicit
+  status and a source reference for every observation. Incompatible sources are refused, profiles compare
+  by raw differences, and there is no score, ranking or verdict.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

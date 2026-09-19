@@ -10,12 +10,13 @@
 5. Fault Injection Laboratory (done)
 6. Failure Registry and Failure Discovery (done)
 7. Fault Interaction Analysis (done)
-7b. Reproducibility + Statistical Engine (planned; renumbered, not started)
-8. Drift Laboratory
-9. Evidence Graph
-10. Reliability Analysis
-11. Benchmark Laboratory
-12. Experiment Planner
-13. Research validation
-14. Advanced UI/API
-15. Public release / reproducibility package
+8. Reliability Profiles (done)
+9. Reproducibility + Statistical Engine (also the home of the interaction limitations: control variability, BCa, multiplicity)
+10. Drift Laboratory
+11. Evidence Graph
+12. Reliability Analysis (statistical, building on profiles)
+13. Benchmark Laboratory
+14. Experiment Planner
+15. Research validation
+16. Advanced UI/API
+17. Public release / reproducibility package

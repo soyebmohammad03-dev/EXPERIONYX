@@ -29,6 +29,10 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     values apart, counts the hypotheses it tests, and never converts an observed contrast into a
     causal claim ([interactions.md](interactions.md)).
 
+11. **A profile is evidence, not a grade.** A reliability profile lists what was observed, derived and
+    interpreted, with sources, statuses and unresolved issues, and never a score, ranking or verdict
+    ([reliability.md](reliability.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

@@ -55,10 +55,11 @@ from experionyx.interactions.entities import (
 )
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
+from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
 
 # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
-# 6: interactions.
-DB_SCHEMA_VERSION = 6
+# 6: interactions. 7: reliability profiles.
+DB_SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,25 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("evidence_kind",),
         since=6,
     ),
+    ReliabilityProfile: _Spec(
+        "reliability_profiles",
+        refs=(("investigation_id", Investigation), ("run_id", Run)),
+        plain=(
+            "spec_id",
+            "scope",
+            "model_fingerprint",
+            "dataset_fingerprint",
+            "split",
+            "evaluation_config_hash",
+        ),
+        since=7,
+    ),
+    ReliabilityReference: _Spec(
+        "reliability_references",
+        refs=(("profile_id", ReliabilityProfile),),
+        plain=("dimension", "ref_kind", "ref_id"),
+        since=7,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -301,12 +321,19 @@ def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
+    """Phase 8: reliability profiles and their evidence references (new tables only)."""
+    for statement in _ddl(upto=7, since=7):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
+    6: _migrate_6_to_7,
 }
 
 
@@ -429,6 +456,8 @@ class SqliteRegistry:
                 self._check_failure_relationship(entity)
             elif isinstance(entity, InteractionAnalysis):
                 self._check_interaction_analysis(entity)
+            elif isinstance(entity, ReliabilityProfile):
+                self._check_reliability_profile(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -442,6 +471,11 @@ class SqliteRegistry:
                 f"VALUES ({', '.join('?' * len(cols))})",
                 values,
             )
+
+    def _check_reliability_profile(self, p: ReliabilityProfile) -> None:
+        run = self.get(Run, p.run_id)
+        if self.get(Experiment, run.experiment_id).investigation_id != p.investigation_id:
+            raise ValidationError("reliability profile run belongs to a different investigation")
 
     def _check_interaction_analysis(self, a: InteractionAnalysis) -> None:
         run = self.get(Run, a.run_id)

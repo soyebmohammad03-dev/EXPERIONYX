@@ -29,7 +29,7 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
-from experionyx.errors import ArtifactIntegrityError, DesignRefusal, ExperionyxError
+from experionyx.errors import ArtifactIntegrityError, DesignRefusal, ExperionyxError, ProfileRefusal
 from experionyx.evaluation.compare import compare_evaluations
 from experionyx.evaluation.config import (
     EvaluationConfig,
@@ -74,6 +74,11 @@ from experionyx.interactions.lifecycle import (
 from experionyx.interactions.registry import InteractionRegistry
 from experionyx.interactions.taxonomy import InteractionStatus
 from experionyx.provenance import Provenance, RunOutcome
+from experionyx.reliability.engine import replay_check as profile_replay_check
+from experionyx.reliability.engine import run_profile
+from experionyx.reliability.entities import ReliabilityProfile
+from experionyx.reliability.registry import ReliabilityProfileRegistry
+from experionyx.reliability.spec import ProfileSpec
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 
 DEFAULT_WORKSPACE = ".experionyx"
@@ -1105,6 +1110,189 @@ def _cmd_interaction_set_status(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- reliability profiles ---------------------------------------------------------------------------------
+
+
+def _load_profile_spec(path: str) -> ProfileSpec:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read profile spec {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("a profile spec file must be a JSON object")
+    return ProfileSpec.from_dict(data)
+
+
+def _profile_row(p: ReliabilityProfile) -> dict[str, object]:
+    return {
+        "id": p.id,
+        "scope": p.scope.value,
+        "model_fingerprint": p.model_fingerprint,
+        "dataset_fingerprint": p.dataset_fingerprint,
+        "split": p.split,
+        "spec_id": p.spec_id,
+        "dimension_status": to_jsonable(p.dimension_status),
+    }
+
+
+def _rreg(args: argparse.Namespace, reg: SqliteRegistry) -> ReliabilityProfileRegistry:
+    return ReliabilityProfileRegistry(
+        reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+    )
+
+
+def _profile_text(doc: dict[str, Any], pid: str) -> str:
+    lines = [f"{pid} [{doc['scope']}]", "dimension status (no overall score):"]
+    lines += [f"  {d:24} {s}" for d, s in doc["dimension_status"].items()]
+    lines += ["observations (INTERPRETED, deterministic templates):"]
+    lines += [f"  - {x['text']}" for x in doc["interpreted"]["statements"]]
+    return "\n".join(lines)
+
+
+def _cmd_reliability_profile(args: argparse.Namespace) -> int:
+    spec = _load_profile_spec(args.spec)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        inv = (
+            args.investigation
+            or reg.get(Experiment, reg.get(Run, spec.baseline_run).experiment_id).investigation_id
+        )
+        try:
+            res = run_profile(reg, store, _executor(reg, args.workspace), inv, spec, seed=args.seed)
+        except ProfileRefusal as exc:  # refused BEFORE any run is created
+            print(
+                "error: profile refused; nothing was built and nothing was recorded",
+                file=sys.stderr,
+            )
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        doc: dict[str, object] = {
+            "profile_run": res.run_id,
+            "status": res.status.value,
+            "profile_id": res.profile_id,
+        }
+        text = res.status.value
+        if res.profile_id:
+            body = _rreg(args, reg).document(res.profile_id)
+            doc["profile"] = _profile_row(reg.get(ReliabilityProfile, res.profile_id))
+            text = _profile_text(body, res.profile_id)
+        _emit(doc, text, args)
+        return 0 if res.status is RunStatus.COMPLETED else 1
+
+
+def _cmd_reliability_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        dim = (
+            (args.dimension, args.dimension_status)
+            if args.dimension and args.dimension_status
+            else None
+        )
+        found = _rreg(args, reg).search(
+            model=args.model,
+            dataset=args.dataset,
+            scope=args.scope,
+            split=args.split,
+            evaluation=args.evaluation,
+            investigation=args.investigation,
+            ref=args.ref,
+            dimension_status=dim,
+        )
+        _emit(
+            {
+                "profiles": [_profile_row(p) for p in found],
+                "note": "profiles are evidence summaries; they are not ranked",
+            },
+            "\n".join(
+                f"{p.id} {p.scope.value:26} model={p.model_fingerprint[:16]} dataset={p.dataset_fingerprint[:16]}"
+                for p in found
+            ),
+            args,
+        )
+    return 0
+
+
+def _cmd_reliability_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        rr = _rreg(args, reg)
+        p = rr.get(args.id)
+        doc = rr.document(p.id)
+        if args.dimension:
+            _dump(
+                {
+                    "profile_id": p.id,
+                    "dimension": args.dimension,
+                    **doc["dimensions"][args.dimension],
+                }
+            )
+            return 0
+        out: dict[str, object] = {
+            **_profile_row(p),
+            "interpreted": doc["interpreted"],
+            "provenance_fingerprint": p.provenance_fingerprint,
+        }
+        if args.full:
+            out["document"] = doc
+        _emit(out, _profile_text(doc, p.id), args)
+    return 0
+
+
+def _cmd_reliability_evidence(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        rr = _rreg(args, reg)
+        refs = rr.references(args.id, dimension=args.dimension)
+        _dump(
+            {
+                "profile_id": args.id,
+                "provenance": to_jsonable(rr.provenance(args.id)),
+                "references": [
+                    {
+                        "dimension": r.dimension.value,
+                        "kind": r.ref_kind.value,
+                        "id": r.ref_id,
+                        "note": r.note,
+                    }
+                    for r in refs
+                ],
+                "artifacts": [
+                    {"path": a.path, "id": a.id, "digest": a.digest} for a in rr.artifacts(args.id)
+                ],
+            }
+        )
+    return 0
+
+
+def _cmd_reliability_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        try:
+            out = _rreg(args, reg).compare(args.a, args.b)
+        except ProfileRefusal as exc:
+            print("error: profiles are not comparable; nothing was compared", file=sys.stderr)
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        shown: Any = to_jsonable(out)
+        _emit(
+            shown,
+            f"compared {args.a} with {args.b} (raw differences b - a; no winner)\n"
+            + "\n".join(f"  {d}: {v['a']} -> {v['b']}" for d, v in out["dimension_status"].items()),
+            args,
+        )
+    return 0
+
+
+def _cmd_reliability_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = profile_replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            args.id,
+        )
+        _dump(out)
+        return 0 if out["deterministic"] else 1
+
+
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
     ws = Path(args.workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -1470,6 +1658,65 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--by", required=True)
     p.add_argument("--reason", required=True)
     p.set_defaults(func=_cmd_interaction_set_status)
+
+    rl = group("reliability", "evidence-first reliability profiles (no overall score or ranking)")
+
+    def rfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument(
+            "--format",
+            choices=["json", "text"],
+            default="json",
+            help="output format (default json)",
+        )
+
+    p = rl.add_parser(
+        "profile", help="build a profile from stored evidence (refused if sources are incompatible)"
+    )
+    p.add_argument(
+        "spec",
+        help="profile spec JSON: scope, baseline_run, fault_experiments, interactions, failure_modes",
+    )
+    p.add_argument("--investigation")
+    p.add_argument("--seed", type=int, default=0)
+    rfmt(p)
+    p.set_defaults(func=_cmd_reliability_profile)
+    p = rl.add_parser("list", help="search registered profiles")
+    for flag in (
+        "model",
+        "dataset",
+        "scope",
+        "split",
+        "evaluation",
+        "investigation",
+        "ref",
+        "dimension",
+        "dimension-status",
+    ):
+        p.add_argument(f"--{flag}")
+    rfmt(p)
+    p.set_defaults(func=_cmd_reliability_list)
+    p = rl.add_parser("inspect", help="one profile: dimension statuses and observations")
+    p.add_argument("id")
+    p.add_argument("--dimension", help="show one dimension in full")
+    p.add_argument("--full", action="store_true", help="include the complete profile document")
+    rfmt(p)
+    p.set_defaults(func=_cmd_reliability_inspect)
+    p = rl.add_parser("evidence", help="source references, provenance and artifacts of a profile")
+    p.add_argument("id")
+    p.add_argument("--dimension")
+    p.set_defaults(func=_cmd_reliability_evidence)
+    p = rl.add_parser(
+        "compare", help="raw per-dimension differences between two compatible profiles"
+    )
+    p.add_argument("a")
+    p.add_argument("b")
+    rfmt(p)
+    p.set_defaults(func=_cmd_reliability_compare)
+    p = rl.add_parser(
+        "replay", help="replay the profile as a NEW run and compare; exit 1 on any difference"
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_reliability_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

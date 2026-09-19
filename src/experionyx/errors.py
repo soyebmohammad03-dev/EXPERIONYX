@@ -144,3 +144,15 @@ class DesignRefusal(InteractionError):
     def __init__(self, issues: "tuple[object, ...]") -> None:
         self.issues = issues
         super().__init__("interaction design refused: " + "; ".join(str(i) for i in issues))
+
+
+class ReliabilityError(ExperionyxError):
+    """Base class for reliability-profile problems."""
+
+
+class ProfileRefusal(ReliabilityError):
+    """The requested sources cannot form one compatible profile; nothing was built."""
+
+    def __init__(self, issues: "tuple[object, ...]") -> None:
+        self.issues = issues
+        super().__init__("reliability profile refused: " + "; ".join(str(i) for i in issues))

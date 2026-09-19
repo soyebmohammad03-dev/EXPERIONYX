@@ -51,6 +51,10 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx interaction failures\|replay\|export\|related <ian_…>` | failure-mode comparison; replay-and-compare (exit 1 on any difference); JSON bundle; structurally similar analyses |
 | `experionyx interaction reproduce <ian_…> --replicate <ian_…>` | check an independent replicate; moves `SUPPORTED` to `REPRODUCIBLE` only if it agrees |
 | `experionyx interaction confirm\|set-status <ian_…> --by WHO --reason WHY` | explicit human confirmation, or reject/deprecate |
+| `experionyx reliability profile SPEC.json [--format text]` | build a reliability profile from stored evidence (refused, with every issue listed, if sources are incompatible) |
+| `experionyx reliability list\|inspect\|evidence <rpf_…>` | search profiles; dimension statuses and observations; source references, provenance and artifacts |
+| `experionyx reliability compare <rpf_…> <rpf_…>` | raw per-dimension differences between two compatible profiles (no winner) |
+| `experionyx reliability replay <rpf_…>` | replay the profile as a new run and compare; exit 1 unless verified deterministic |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
