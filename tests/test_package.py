@@ -41,3 +41,14 @@ def test_cli_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
         main(["--version"])
     assert exc.value.code == 0
     assert experionyx.__version__ in capsys.readouterr().out
+
+
+def test_optional_frameworks_are_installed_when_required() -> None:
+    """CI sets EXPERIONYX_REQUIRE_FRAMEWORKS so ML tests can never skip silently there."""
+    import importlib.util
+    import os
+
+    if not os.environ.get("EXPERIONYX_REQUIRE_FRAMEWORKS"):
+        pytest.skip("EXPERIONYX_REQUIRE_FRAMEWORKS is not set (local run without the extras)")
+    missing = [m for m in ("numpy", "sklearn", "torch") if importlib.util.find_spec(m) is None]
+    assert not missing, f"optional frameworks required but not installed: {missing}"

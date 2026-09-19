@@ -103,3 +103,7 @@ class DatasetFingerprintError(AdapterError):
 
 class InferenceError(AdapterError):
     """Inference failed or was given invalid inputs."""
+
+
+class EvaluationError(ExperionyxError):
+    """An evaluation request is invalid or cannot be carried out as configured."""

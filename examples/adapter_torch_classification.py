@@ -1,4 +1,4 @@
-"""Real adapter-backed experiment: torch-classification.
+"""Real baseline evaluation (adapter-backed): torch-classification.
 
     pip install 'experionyx[torch]'
     python examples/adapter_torch_classification.py [workspace]
@@ -16,8 +16,11 @@ from experionyx.execution import ExecutionResult
 
 def report(result: ExecutionResult) -> None:
     print(f"run {result.run.id}: {result.status}")
+    shown = ("metric.", "calibration.", "latency.median", "imbalance.")
     for obs in result.observations:
-        print(f"  {obs.name} = {obs.value}" + (f" {obs.unit}" if obs.unit else ""))
+        if obs.name.startswith(shown) and not obs.name.endswith(".interval"):
+            print(f"  {obs.name} = {obs.value}" + (f" {obs.unit}" if obs.unit else ""))
+    print(f"  {len(result.observations)} observations, {len(result.artifacts)} artifacts recorded")
     for art in result.artifacts:
         print(f"  artifact {art.path} {art.digest}")
     inputs = result.provenance.inputs

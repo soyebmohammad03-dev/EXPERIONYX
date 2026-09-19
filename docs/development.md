@@ -47,3 +47,12 @@ inspect it.
 - Do not commit generated artifacts unnecessarily, or datasets/models that are large or
   inappropriate to redistribute.
 - Secrets never enter the repository.
+
+## CI
+`.github/workflows/ci.yml` runs Ruff (lint and format), strict mypy and pytest on Python 3.11 and
+3.12 with scikit-learn and the CPU-only torch wheel. `fail-fast` is off and every check runs even
+if an earlier one failed, so one run reports every problem. Tool versions are bounded in the
+`dev` extra. `EXPERIONYX_REQUIRE_FRAMEWORKS=1` makes a missing sklearn/torch a test *failure*
+instead of a skip. Lessons behind these choices: numpy stubs differ between the versions each
+Python resolves (so `# type: ignore` comments must tolerate both), and floating-point results can
+differ in the last bits between platforms (so tests compare floats with tolerances).

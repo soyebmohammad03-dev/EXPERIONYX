@@ -2,9 +2,10 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 3 (model + dataset adapters).** The typed domain model, a local SQLite registry,
-> an execution engine that records provenance and artifact digests, and framework-agnostic model and
-> dataset adapters (concrete: scikit-learn and PyTorch) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
+> **Status: Phase 4 (baseline evaluation + model autopsy).** The typed domain model, a local SQLite registry,
+> an execution engine that records provenance and artifact digests, framework-agnostic model and
+> dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
+> (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
 > implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -51,6 +52,11 @@ See [docs/architecture.md](docs/architecture.md) and
   registered models/datasets verified before every run and recorded in provenance, contract
   tests every adapter must pass. sklearn and PyTorch are the *initial* integrations, optional
   extras; the core imports neither.
+- Baseline evaluation and autopsy ([docs/evaluation.md](docs/evaluation.md)): a metric registry,
+  confidence/calibration, bootstrap intervals, class-imbalance and slice analysis, error records,
+  latency, transparent rule-based findings linked to evidence, and structured comparison. It
+  reports measurements and observations, not causes
+  ([docs/observation-vs-conclusion.md](docs/observation-vs-conclusion.md)).
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

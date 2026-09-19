@@ -1,6 +1,7 @@
 """Command line interface. Every command reads or writes the real registry of a workspace."""
 
 import argparse
+import dataclasses
 import json
 import logging
 import platform
@@ -10,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from experionyx import __version__
-from experionyx.adapters.capabilities import DeviceKind
+from experionyx.adapters.capabilities import DeviceKind, TaskType
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.adapters.registry import default_registries
 from experionyx.artifacts import LocalArtifactStore
@@ -20,6 +21,7 @@ from experionyx.domain import (
     ConfigurationRef,
     Entity,
     Experiment,
+    ExperimentStatus,
     Investigation,
     Observation,
     Run,
@@ -27,6 +29,15 @@ from experionyx.domain import (
     to_jsonable,
 )
 from experionyx.errors import ArtifactIntegrityError, ExperionyxError
+from experionyx.evaluation.compare import compare_evaluations
+from experionyx.evaluation.config import (
+    EvaluationConfig,
+    ScoreSource,
+)
+from experionyx.evaluation.engine import PROCEDURE
+from experionyx.evaluation.metrics import default_metric_registry
+from experionyx.evaluation.results import EvaluationResult
+from experionyx.evaluation.serial import from_jsonable
 from experionyx.execution import ExecutionResult, Executor, resolve_procedure, run_states
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
@@ -265,6 +276,144 @@ def _cmd_demo(args: argparse.Namespace) -> int:
     return _report(run_demo(args.name, Path(args.workspace), args.seed))
 
 
+def _cmd_metrics_list(args: argparse.Namespace) -> int:
+    registry = default_metric_registry()
+    for m in (
+        registry.for_task(TaskType(args.task)) if args.task else map(registry.get, registry.ids())
+    ):
+        tasks = ",".join(sorted(t.value for t in m.tasks))
+        needs = ",".join(sorted(r.value for r in m.requires))
+        print(f"{m.id:22} v{m.version} {tasks:15} requires={needs:14} scale={m.scale}  {m.name}")
+    return 0
+
+
+def _evaluation_config(args: argparse.Namespace) -> EvaluationConfig:
+    if args.config:
+        config = EvaluationConfig.from_dict(
+            json.loads(Path(args.config).read_text(encoding="utf-8"))
+        )
+    else:
+        config = EvaluationConfig()
+    changes: dict[str, object] = {}
+    if args.split is not None:
+        changes["split"] = args.split
+    if args.batch_size is not None:
+        changes["batch_size"] = args.batch_size
+    if args.metric:
+        changes["metrics"] = tuple(args.metric)
+    if args.score_source is not None:
+        changes["score_source"] = ScoreSource(args.score_source)
+    if args.bins is not None:
+        changes["calibration"] = dataclasses.replace(config.calibration, bins=args.bins)
+    if args.bootstrap_resamples is not None:
+        changes["bootstrap"] = dataclasses.replace(
+            config.bootstrap,
+            enabled=args.bootstrap_resamples > 0,
+            resamples=max(1, args.bootstrap_resamples),
+        )
+    return dataclasses.replace(config, **changes)  # type: ignore[arg-type]
+
+
+def _run_evaluation(args: argparse.Namespace, model_id: str, dataset_id: str) -> ExecutionResult:
+    config = _evaluation_config(args)
+    with _open(args.workspace) as reg:
+        model = reg.get(RegisteredModel, model_id)
+        dataset = reg.get(RegisteredDataset, dataset_id)
+        now = datetime.now(UTC)
+        inv = Investigation(
+            "baseline-evaluation",
+            "How does each registered model behave on its baseline data?",
+            now,
+        )
+        cfg = ConfigurationRef(config.to_parameters())
+        exp = Experiment(
+            inv.id,
+            f"evaluate {model.name} {model.version} on {dataset.name} {dataset.version}",
+            "Baseline evaluation: measurements only, no causal claim",
+            model.ref(),
+            dataset.ref(),
+            cfg.id,
+            now,
+        )
+        for entity in (inv, cfg, exp):
+            if not reg.exists(type(entity), entity.id):
+                reg.add(entity)
+        if reg.get(Experiment, exp.id).status is ExperimentStatus.DRAFT:
+            reg.update_status(exp.with_status(ExperimentStatus.READY))
+        return _executor(reg, args.workspace).execute(
+            exp.id, resolve_procedure(PROCEDURE), seed=args.seed, procedure_name=PROCEDURE
+        )
+
+
+def _summary(evaluation: EvaluationResult) -> dict[str, object]:
+    return {
+        "run": evaluation.context.run_id,
+        "task": evaluation.task.value,
+        "n_samples": evaluation.n_samples,
+        "metrics": {
+            m.metric_id: (
+                m.value if m.status.value == "COMPUTED" else f"{m.status.value}: {m.reason}"
+            )
+            for m in evaluation.metrics
+            if m.value is not None or m.status.value != "COMPUTED"
+        },
+        "findings": [_json(f) for f in evaluation.findings],
+        "profile": _json(evaluation.profile) if evaluation.profile else None,
+        "warnings": list(evaluation.warnings),
+    }
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    result = _run_evaluation(args, args.model, args.dataset)
+    code = _report(result)
+    if result.status is RunStatus.COMPLETED:
+        print(f"inspect with: experionyx evaluation inspect {result.run.id}")
+    return code
+
+
+def _cmd_autopsy(args: argparse.Namespace) -> int:
+    result = _run_evaluation(args, args.model_id, args.dataset)
+    if result.status is not RunStatus.COMPLETED:
+        return _report(result)
+    with _open(args.workspace) as reg:
+        evaluation = _load_evaluation(reg, args.workspace, result.run.id)
+    _dump(
+        {
+            "run": result.run.id,
+            "profile": _json(evaluation.profile),
+            "findings": [_json(f) for f in evaluation.findings],
+        }
+    )
+    return 0
+
+
+def _load_evaluation(reg: SqliteRegistry, workspace: str, run_id: str) -> EvaluationResult:
+    run = reg.get(Run, run_id)
+    found = [a for a in reg.find(Artifact, run_id=run.id) if a.path == "evaluation/evaluation.json"]
+    if not found:
+        raise ExperionyxError(f"run {run.id} has no evaluation artifact")
+    store = LocalArtifactStore(Path(workspace) / EXPERIMENTS_DIR)
+    store.verify(run, found[0])  # the stored evaluation must still match its recorded digest
+    text = (store.run_dir(run) / "artifacts" / found[0].path).read_text(encoding="utf-8")
+    result: EvaluationResult = from_jsonable(EvaluationResult, json.loads(text))
+    return result
+
+
+def _cmd_evaluation_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        evaluation = _load_evaluation(reg, args.workspace, args.run)
+    _dump(_json(evaluation) if args.full else _summary(evaluation))
+    return 0
+
+
+def _cmd_evaluation_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        a = _load_evaluation(reg, args.workspace, args.run_a)
+        b = _load_evaluation(reg, args.workspace, args.run_b)
+    _dump(_json(compare_evaluations(a, b)))
+    return 0
+
+
 def _report(result: ExecutionResult) -> int:
     print(f"run: {result.run.id}")
     print(f"status: {result.status}")
@@ -378,6 +527,45 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", default="1")
     p.add_argument("--option", action="append", default=[])
     p.set_defaults(func=_cmd_model_register)
+
+    def eval_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--dataset", required=True, help="registered dataset ID (dst_...)")
+        p.add_argument("--config", help="EvaluationConfig JSON file (strict: unknown fields fail)")
+        p.add_argument("--split", help="dataset split to evaluate")
+        p.add_argument("--batch-size", type=int)
+        p.add_argument(
+            "--metric", action="append", help="metric ID (repeatable); default: all applicable"
+        )
+        p.add_argument("--score-source", choices=[x.value for x in ScoreSource])
+        p.add_argument("--bins", type=int, help="calibration bins")
+        p.add_argument("--bootstrap-resamples", type=int, help="0 disables bootstrap intervals")
+        p.add_argument("--seed", type=int, default=0, help="run seed (default 0)")
+
+    p = models.add_parser(
+        "autopsy", help="evaluate a registered model and print its profile and findings"
+    )
+    p.add_argument("model_id", help="registered model ID (mdl_...)")
+    eval_args(p)
+    p.set_defaults(func=_cmd_autopsy)
+
+    p = add(
+        "evaluate", _cmd_evaluate, "run a baseline evaluation of a registered model on a dataset"
+    )
+    p.add_argument("--model", required=True, help="registered model ID (mdl_...)")
+    eval_args(p)
+    metrics = group("metrics", "list the metric registry")
+    p = metrics.add_parser("list", help="metrics, their tasks, requirements and scales")
+    p.add_argument("--task", choices=["CLASSIFICATION", "REGRESSION"])
+    p.set_defaults(func=_cmd_metrics_list)
+    evals = group("evaluation", "inspect and compare stored evaluations")
+    p = evals.add_parser("inspect", help="summary of a run's stored evaluation")
+    p.add_argument("run")
+    p.add_argument("--full", action="store_true", help="print the complete EvaluationResult")
+    p.set_defaults(func=_cmd_evaluation_inspect)
+    p = evals.add_parser("compare", help="structured comparison of two evaluation runs (no winner)")
+    p.add_argument("run_a")
+    p.add_argument("run_b")
+    p.set_defaults(func=_cmd_evaluation_compare)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

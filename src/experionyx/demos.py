@@ -1,12 +1,11 @@
-"""Small, real adapter-backed experiments (`experionyx demo <name>`, and `examples/`).
+"""Small, real evaluation experiments (`experionyx demo <name>`, and `examples/`).
 
 Each demo trains a tiny model on tiny data inside the workspace, registers the model and dataset,
-creates an experiment, and executes it through the normal execution engine. Every reported number
+creates an evaluation experiment, and executes it through the normal execution engine using
+the baseline evaluation engine (experionyx.evaluation). Every reported number
 is measured during the run; nothing is precomputed. Requires the matching optional extra.
 """
 
-import json
-from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,69 +16,50 @@ from experionyx.adapters.registry import default_registries
 from experionyx.artifacts import LocalArtifactStore
 from experionyx.domain import ConfigurationRef, Entity, Experiment, ExperimentStatus, Investigation
 from experionyx.errors import AdapterUnavailableError, ExperionyxError
-from experionyx.execution import ExecutionResult, Executor, RunContext
+from experionyx.evaluation.config import (
+    EvaluationConfig,
+    ScoreSource,
+    SliceCondition,
+    SliceKind,
+    SliceSpec,
+)
+from experionyx.evaluation.engine import PROCEDURE
+from experionyx.execution import ExecutionResult, Executor, resolve_procedure
 from experionyx.sqlite import SqliteRegistry
 
 DEMOS = ("sklearn-classification", "sklearn-regression", "torch-classification")
-_BATCH_SIZE = 16
-
-
-def _values(x: object) -> list[object]:
-    tolist = getattr(x, "tolist", None)
-    return list(tolist()) if callable(tolist) else list(x)  # type: ignore[call-overload]
-
-
-def _predict_test_split(ctx: RunContext) -> tuple[list[object], list[object], float]:
-    """Run the model over the configured split batch by batch; returns (predictions, targets, s)."""
-    model, dataset = ctx.model, ctx.dataset
-    if model is None or dataset is None:
-        raise ExperionyxError("this procedure needs a registered model and dataset")
-    split = str(ctx.parameters["split"])
-    predictions: list[object] = []
-    targets: list[object] = []
-    seconds = 0.0
-    for batch in dataset.batches(int(str(ctx.parameters["batch_size"])), split):
-        result = model.predict(batch.inputs, sample_ids=batch.indices)
-        predictions.extend(result.outputs)
-        targets.extend(_values(batch.target))
-        seconds += result.inference_seconds
-    ctx.observe("model_load_seconds", model.load_seconds, unit="s")
-    ctx.observe("inference_seconds", seconds, unit="s")
-    ctx.observe("n_samples", len(predictions))
-    return predictions, targets, seconds
-
-
-def _save_predictions(ctx: RunContext, predictions: Sequence[object]) -> None:
-    (ctx.artifact_dir / "predictions.json").write_text(json.dumps(predictions), encoding="utf-8")
-    ctx.register_artifact("predictions.json", name="predictions")
-
-
-def classification_eval(ctx: RunContext) -> None:
-    predictions, targets, _ = _predict_test_split(ctx)
-    correct = sum(1 for p, t in zip(predictions, targets, strict=True) if p == t)
-    ctx.observe("accuracy", correct / len(predictions), unit="ratio")
-    _save_predictions(ctx, predictions)
-
-
-def torch_classification_eval(ctx: RunContext) -> None:
-    predictions, targets, _ = _predict_test_split(ctx)  # predictions are logits per sample
-    logits = [list(row) for row in predictions]  # type: ignore[call-overload]
-    labels = [max(range(len(row)), key=row.__getitem__) for row in logits]
-    correct = sum(1 for p, t in zip(labels, targets, strict=True) if p == t)
-    ctx.observe("accuracy", correct / len(labels), unit="ratio")
-    _save_predictions(ctx, labels)
-
-
-def regression_eval(ctx: RunContext) -> None:
-    predictions, targets, _ = _predict_test_split(ctx)
-    errors = [abs(float(p) - float(t)) for p, t in zip(predictions, targets, strict=True)]  # type: ignore[arg-type]
-    ctx.observe("mean_absolute_error", sum(errors) / len(errors))
-    _save_predictions(ctx, predictions)
 
 
 def _ensure(registry: SqliteRegistry, entity: Entity) -> None:
     if not registry.exists(type(entity), entity.id):
         registry.add(entity)
+
+
+def _sklearn_config(regression: bool) -> EvaluationConfig:
+    if regression:
+        bmi = SliceCondition(SliceKind.FEATURE_RANGE, field="bmi", low=0.0)
+        return EvaluationConfig(
+            split="test", batch_size=16, slices=(SliceSpec("high-bmi", (bmi,)),)
+        )
+    wide = SliceCondition(SliceKind.FEATURE_RANGE, field="petal width (cm)", low=1.0)
+    class0 = SliceCondition(SliceKind.TARGET_EQUALS, value=0)
+    return EvaluationConfig(
+        split="test",
+        batch_size=16,
+        slices=(SliceSpec("class-0", (class0,)), SliceSpec("wide-petals", (wide,))),
+    )
+
+
+# The torch demo model outputs logits, so probabilities are derived with softmax (an explicit,
+# recorded assumption); slices use a column index because the tensors have no feature names.
+_TORCH_CONFIG = EvaluationConfig(
+    split="test",
+    batch_size=16,
+    score_source=ScoreSource.SOFTMAX_LOGITS,
+    slices=(
+        SliceSpec("x0-positive", (SliceCondition(SliceKind.FEATURE_RANGE, field="0", low=0.0),)),
+    ),
+)
 
 
 def _register_and_run(
@@ -91,7 +71,7 @@ def _register_and_run(
     dataset: DatasetAdapter,
     dataset_source: str,
     dataset_options: dict[str, object],
-    procedure: Callable[[RunContext], None],
+    config: EvaluationConfig,
     seed: int,
 ) -> ExecutionResult:
     now = datetime.now(UTC)
@@ -100,7 +80,7 @@ def _register_and_run(
         rec_model = RegisteredModel(name, model.metadata(), now, model_source, {})
         rec_data = RegisteredDataset(name, dataset.metadata(), now, dataset_source, dataset_options)
         inv = Investigation(f"demo-{name}", "Does an adapter-backed run record what it used?", now)
-        cfg = ConfigurationRef({"batch_size": _BATCH_SIZE, "split": "test"})
+        cfg = ConfigurationRef(config.to_parameters())
         exp = Experiment(
             inv.id, name, f"{name} runs end to end through the adapters",
             rec_model.ref(), rec_data.ref(), cfg.id, now,
@@ -118,10 +98,7 @@ def _register_and_run(
             device=DeviceKind.CPU,
         )
         return executor.execute(
-            exp.id,
-            procedure,
-            seed=seed,
-            procedure_name=f"{procedure.__module__}:{procedure.__name__}",
+            exp.id, resolve_procedure(PROCEDURE), seed=seed, procedure_name=PROCEDURE
         )
     finally:
         registry.close()
@@ -150,7 +127,7 @@ def _sklearn_demo(workspace: Path, seed: int, *, regression: bool) -> ExecutionR
     return _register_and_run(
         workspace, name=name, model=model, model_source=f"models/{name}.joblib",
         dataset=dataset, dataset_source=f"builtin:{builtin}", dataset_options=options,
-        procedure=regression_eval if regression else classification_eval, seed=seed,
+        config=_sklearn_config(regression), seed=seed,
     )  # fmt: skip
 
 
@@ -204,7 +181,7 @@ def _torch_demo(workspace: Path, seed: int) -> ExecutionResult:
     return _register_and_run(
         workspace, name=name, model=model, model_source=f"models/{name}.pt",
         dataset=dataset, dataset_source=f"datasets/{name}.pt", dataset_options=options,
-        procedure=torch_classification_eval, seed=seed,
+        config=_TORCH_CONFIG, seed=seed,
     )  # fmt: skip
 
 

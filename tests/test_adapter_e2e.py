@@ -245,7 +245,7 @@ def test_demos_run_for_real_and_are_repeatable(
     assert len({r.experiment_id for r in runs}) == 1
     assert len(reg.find(RegisteredModel)) == 1
     values = [{o.name: o.value for o in reg.find(Observation, run_id=r.id)} for r in runs]
-    key = "mean_absolute_error" if "regression" in name else "accuracy"
+    key = "metric.mae" if "regression" in name else "metric.accuracy"
     assert values[0][key] == values[1][key]
     reg.close()
 

@@ -21,3 +21,6 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
 
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
+
+The distinction between observations, findings, interpretations and conclusions is defined in
+[observation-vs-conclusion.md](observation-vs-conclusion.md).

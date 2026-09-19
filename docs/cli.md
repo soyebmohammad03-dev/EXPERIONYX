@@ -23,7 +23,12 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx model register --name N --source S --adapter A [--version V --option k=v]` | load, fingerprint and register a model |
 | `experionyx dataset inspect <dst_id \| source> [--adapter A --deep]` | show a registered dataset, or load a source (`--deep` computes expensive statistics) |
 | `experionyx dataset register --name N --source S --adapter A` | load, fingerprint and register a dataset |
-| `experionyx demo {sklearn-classification,sklearn-regression,torch-classification}` | train a tiny model, register it and its dataset, and execute a real adapter-backed experiment |
+| `experionyx demo {sklearn-classification,sklearn-regression,torch-classification}` | train a tiny model, register it and its dataset, and run a real baseline evaluation |
+| `experionyx metrics list [--task T]` | the metric registry: tasks, requirements, scales |
+| `experionyx evaluate --model mdl_… --dataset dst_… [--split S --batch-size N --metric M… --score-source X --bins N --bootstrap-resamples N --config FILE --seed N]` | run a baseline evaluation as a real run (a `--config` file is strict: unknown fields fail) |
+| `experionyx model autopsy mdl_… --dataset dst_… [same options]` | evaluate, then print the model profile and findings |
+| `experionyx evaluation inspect <run> [--full]` | summary (or the full result) of a run's stored evaluation; verifies the artifact digest |
+| `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through

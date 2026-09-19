@@ -36,9 +36,14 @@ from experionyx.capture import (
 from experionyx.domain import (
     Artifact,
     ArtifactCategory,
+    Claim,
+    ClaimStatus,
     ConfigurationRef,
     EnvironmentSnapshot,
     EpistemicKind,
+    Evidence,
+    EvidenceRelation,
+    EvidenceTarget,
     Experiment,
     ExperimentStatus,
     Observation,
@@ -142,6 +147,7 @@ class RunContext:
     model: ModelAdapter | None = None  # loaded and fingerprint-verified, if the experiment has one
     dataset: DatasetAdapter | None = None
     device: DeviceInfo | None = None
+    inputs: AdapterInputs | None = None  # record IDs and fingerprints of the bound model/dataset
 
     @property
     def parameters(self) -> Mapping[str, object]:
@@ -167,6 +173,33 @@ class RunContext:
     ) -> Artifact:
         """Hash and register a file already written under `artifact_dir` (`path` is relative)."""
         return self.recorder.register(path, name or path, category, media_type)
+
+    def assert_claim(
+        self,
+        statement: str,
+        *,
+        asserted_by: str,
+        status: ClaimStatus = ClaimStatus.INSUFFICIENT_EVIDENCE,
+    ) -> Claim:
+        """Record a claim in this experiment's investigation (persisted immediately)."""
+        claim = Claim(
+            self.experiment.investigation_id, statement, asserted_by, self.recorder.clock(), status
+        )
+        self.recorder.registry.add(claim)
+        return claim
+
+    def add_evidence(
+        self,
+        claim: Claim,
+        target_kind: EvidenceTarget,
+        target_id: str,
+        relation: EvidenceRelation = EvidenceRelation.SUPPORTS,
+        note: str | None = None,
+    ) -> Evidence:
+        """Link `claim` to a record of this run (observation, artifact, run, ...)."""
+        evidence = Evidence(claim.id, target_kind, target_id, relation, self.recorder.clock(), note)
+        self.recorder.registry.add(evidence)
+        return evidence
 
 
 Procedure = Callable[[RunContext], None]
@@ -327,7 +360,7 @@ class Executor:
         context = RunContext(
             experiment, running, configuration, seed, provenance.started_at, source,
             execution, artifact_dir, self._source_root, recorder,
-            bound.model, bound.dataset, bound.inputs.device if bound.inputs else None,
+            bound.model, bound.dataset, bound.inputs.device if bound.inputs else None, bound.inputs,
         )  # fmt: skip
 
         error: ErrorInfo | None = None

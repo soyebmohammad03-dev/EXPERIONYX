@@ -1,6 +1,7 @@
 """Tiny real adapters with no ML framework: a stand-in for a third-party adapter package.
 They exercise the protocols, registry, executor and contract suites without sklearn/torch."""
 
+import hashlib
 import json
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -34,7 +35,6 @@ from experionyx.errors import (
     InvalidDatasetError,
     ModelLoadError,
 )
-from experionyx.hashing import content_hash
 
 
 class ConstantModelAdapter(BaseModelAdapter):
@@ -164,6 +164,10 @@ class ListDatasetAdapter(BaseDatasetAdapter):
         except (OSError, ValueError, KeyError) as exc:
             raise DatasetLoadError(f"cannot load {source}: {exc}") from exc
 
+    def _feature_names(self) -> tuple[str, ...] | None:
+        names = self._payload.get("feature_names")
+        return tuple(str(n) for n in names) if isinstance(names, list) else None
+
     @property
     def capabilities(self) -> frozenset[DatasetCapability]:
         caps = {
@@ -178,7 +182,9 @@ class ListDatasetAdapter(BaseDatasetAdapter):
         return frozenset(caps)
 
     def fingerprint(self) -> str:
-        return content_hash(self._payload)
+        # allow_nan: test payloads deliberately contain NaN targets
+        blob = json.dumps(self._payload, sort_keys=True).encode()
+        return "sha256:" + hashlib.sha256(blob).hexdigest()
 
     def splits(self) -> tuple[str, ...]:
         return tuple(sorted(self._splits))
@@ -196,8 +202,14 @@ class ListDatasetAdapter(BaseDatasetAdapter):
     def metadata(self, *, deep: bool = False) -> DatasetMetadata:
         return DatasetMetadata(
             adapter=self.NAME, adapter_version=self.VERSION, family="list", version=self._version,
-            fingerprint=self.fingerprint(), task=TaskType.REGRESSION,
+            fingerprint=self.fingerprint(),
+            task=TaskType(str(self._payload.get("task", "REGRESSION"))),
             num_samples=len(self._rows), num_features=len(self._rows[0]),
+            input_schema=TensorSchema(
+                Modality.TABULAR,
+                shape=(None, len(self._rows[0])),
+                feature_names=self._feature_names(),
+            ),
             splits={k: len(v) for k, v in self._splits.items()},
             missing_values=0 if deep else None,
             capabilities=tuple(self.capabilities),
@@ -219,3 +231,86 @@ class ListDatasetAdapter(BaseDatasetAdapter):
                 [self._rows[i] for i in ids],
                 None if self._targets is None else [self._targets[i] for i in ids],
             )
+
+
+class ThresholdClassifierAdapter(BaseModelAdapter):
+    """A binary classifier stored as JSON `{"threshold": t, "proba": bool}`: predicts 1 when the
+    first feature exceeds t. With `"proba": true` it also offers PREDICT_PROBA (p1 = x0 / 10,
+    clipped) so calibration paths can be exercised without any ML framework."""
+
+    NAME: ClassVar[str] = "threshold"
+    VERSION: ClassVar[str] = "1.0.0"
+    FRAMEWORK: ClassVar[str] = "pure-python"
+    POSSIBLE_CAPABILITIES: ClassVar[frozenset[ModelCapability]] = frozenset(
+        {ModelCapability.PREDICT, ModelCapability.BATCH_PREDICT, ModelCapability.PREDICT_PROBA}
+    )
+
+    def __init__(self, threshold: float, proba: bool, fingerprint: str, version: str) -> None:
+        self._t, self._proba, self._fp, self._version = threshold, proba, fingerprint, version
+        self.load_seconds = 0.0
+        self.device = DeviceInfo.cpu()
+
+    @classmethod
+    def load(
+        cls, source: str | Path, *, version: str, device: DeviceKind, options: Mapping[str, object]
+    ) -> Self:
+        try:
+            digest, _ = sha256_file(Path(source))
+            data = json.loads(Path(source).read_text())
+        except (OSError, ValueError) as exc:
+            raise ModelLoadError(f"cannot load {source}: {exc}") from exc
+        return cls(float(data["threshold"]), bool(data.get("proba", False)), digest, version)
+
+    @property
+    def capabilities(self) -> frozenset[ModelCapability]:
+        base = {ModelCapability.PREDICT, ModelCapability.BATCH_PREDICT}
+        return frozenset(base | ({ModelCapability.PREDICT_PROBA} if self._proba else set()))
+
+    def fingerprint(self) -> str:
+        return self._fp
+
+    def metadata(self) -> ModelMetadata:
+        return ModelMetadata(
+            adapter=self.NAME, adapter_version=self.VERSION, framework=self.FRAMEWORK,
+            model_type="ThresholdClassifier", version=self._version, fingerprint=self._fp,
+            task=TaskType.CLASSIFICATION,
+            output_schema=TensorSchema(shape=(None,), class_labels=(0, 1)),
+            capabilities=tuple(self.capabilities),
+        )  # fmt: skip
+
+    def _result(
+        self, cap: ModelCapability, outputs: list[object], ids: Sequence[SampleId] | None
+    ) -> InferenceResult:
+        return InferenceResult(
+            outputs=tuple(outputs), capability=cap, sample_count=len(outputs), batch_count=1,
+            batch_size=None, inference_seconds=1e-6, batch_seconds=(1e-6,),
+            model_fingerprint=self._fp,
+            adapter=self.NAME, adapter_version=self.VERSION, device=self.device,
+            sample_ids=None if ids is None else tuple(ids),
+        )  # fmt: skip
+
+    def predict(
+        self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        if not isinstance(inputs, list) or not inputs:
+            raise InferenceError("inputs must be a non-empty list of rows")
+        return self._result(
+            ModelCapability.PREDICT, [1 if r[0] > self._t else 0 for r in inputs], sample_ids
+        )
+
+    def predict_proba(
+        self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        self.require(ModelCapability.PREDICT_PROBA)
+        if not isinstance(inputs, list) or not inputs:
+            raise InferenceError("inputs must be a non-empty list of rows")
+        rows: list[object] = []
+        for r in inputs:
+            p1 = min(max(float(r[0]) / 10.0, 0.0), 1.0)
+            rows.append((1.0 - p1, p1))
+        return self._result(ModelCapability.PREDICT_PROBA, rows, sample_ids)
+
+    def batch_predict(
+        self, inputs: Inputs, batch_size: int, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        return self.predict(inputs, sample_ids=sample_ids)
