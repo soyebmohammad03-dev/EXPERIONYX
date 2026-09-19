@@ -41,8 +41,9 @@ target-version = "py311"
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PT", "RUF", "T20", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+"tests/*" = ["S101", "S311", "S603", "S607"]  # asserts; subprocess of git in fixtures
 "src/experionyx/cli.py" = ["T201"]  # CLI output is intentional stdout
+"examples/*" = ["T201", "S311"]  # demo output; random is for illustration, not security
 
 [tool.mypy]
 strict = true

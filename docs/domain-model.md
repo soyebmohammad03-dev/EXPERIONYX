@@ -12,8 +12,10 @@ prefix). Mapping/list fields are deep-copied into read-only structures.
 | `EnvironmentSnapshot` | Python/OS/machine/packages/source revision of a run | all fields |
 | `Experiment` | Reproducible definition: model, dataset, configuration, hypothesis | investigation, name, hypothesis, model, dataset, configuration |
 | `Run` | One execution of an experiment (environment + seed + attempt) | experiment, environment, seed, attempt |
-| `Observation` | Measured value from a run | run, name, sequence |
-| `Artifact` | Metadata of a file a run produced (path, sha256, size, media type) | run, path, digest |
+| `Observation` | Measured value (scalar or JSON-structured, frozen) from a run | run, name, sequence |
+| `Artifact` | Metadata of a file a run produced (name, category, path, sha256, size, media type) | run, path, digest |
+| `Provenance` | Inputs/context of a run: environment, dependencies, source, config, seed, execution (see [provenance.md](provenance.md)) | run |
+| `RunOutcome` | How a run ended: status, duration, structured error, artifact IDs, observation count | run |
 | `Claim` | Statement in an investigation, with `asserted_by` and a `ClaimStatus` | investigation, statement |
 | `Evidence` | Links a claim to an experiment/run/observation/artifact as SUPPORTS/REFUTES/CONTEXT | claim, target kind, target, relation |
 
@@ -56,5 +58,5 @@ hypothesis), following [methodology.md](methodology.md).
 - Evidence is checked to point at an existing record, not to belong to the same investigation
   as its claim.
 - `Claim.status` is not validated against its evidence.
-- Artifact *files* are not stored or verified; only their metadata and digest are recorded.
+- Artifact bytes live in the artifact store, not the registry; see [artifacts.md](artifacts.md).
 - Entities are not hashable (they may contain read-only mappings).

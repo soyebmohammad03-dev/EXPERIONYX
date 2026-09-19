@@ -1,4 +1,5 @@
 import dataclasses
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -90,7 +91,21 @@ def test_observation_value_rules() -> None:
     with pytest.raises(ValidationError):
         Observation(RUN.id, "acc", float("nan"), T0)
     with pytest.raises(ValidationError):
-        Observation(RUN.id, "acc", [1], T0)  # type: ignore[arg-type]
+        Observation(RUN.id, "acc", object(), T0)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        Observation(RUN.id, "acc", None, T0)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        Observation(RUN.id, "acc", {"a": float("inf")}, T0)
+
+
+def test_structured_observation_values_are_frozen() -> None:
+    o = Observation(RUN.id, "curve", {"xs": [1, 2], "meta": {"k": "v"}}, T0)
+    value = o.value
+    assert isinstance(value, Mapping)
+    assert value["xs"] == (1, 2)
+    with pytest.raises(TypeError):
+        value["new"] = 1  # type: ignore[index]
+    assert Observation.from_dict(o.to_dict()) == o
 
 
 def test_observation_kind_restricted() -> None:
@@ -235,6 +250,7 @@ ALL = [
     evidence(claim(INV), OBS),
     Observation(RUN.id, "flag", True, T0),
     Observation(RUN.id, "label", "cat", T0, sequence=2),
+    Observation(RUN.id, "curve", {"xs": [1.5, 2], "ok": True}, T0, sequence=3),
 ]
 
 

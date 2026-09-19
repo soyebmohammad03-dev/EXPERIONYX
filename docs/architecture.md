@@ -1,9 +1,11 @@
 # Architecture
 
-> **Current state:** Phase 1. Implemented: the domain model ([domain-model.md](domain-model.md)),
-> canonical hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite
-> backend ([registry.md](registry.md)), and a minimal CLI. Everything else below is **planned**
-> and will be introduced incrementally.
+> **Current state:** Phase 2. Implemented: the domain model ([domain-model.md](domain-model.md)),
+> hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite backend
+> ([registry.md](registry.md)), an execution engine ([execution.md](execution.md)), provenance
+> capture ([provenance.md](provenance.md)), a local artifact store ([artifacts.md](artifacts.md))
+> and a CLI ([cli.md](cli.md)). Everything else below is **planned** and will be introduced
+> incrementally.
 
 ## Purpose and goals
 
@@ -31,7 +33,19 @@ flowchart TD
     APP --> PERSIST
 ```
 
-Today: `errors`, `validation`, `hashing` → `domain` → `registry` (protocol) → `sqlite`; `cli` is separate. No circular imports; no hidden global state.
+Today: `errors`, `validation`, `hashing` → `domain` → `provenance` (entities) → `registry`
+(protocol) → `sqlite`; infrastructure (`capture`, `artifacts`) is independent of the registry;
+`execution` composes registry + capture + artifacts; `cli` sits on top.
+
+```mermaid
+flowchart LR
+    ER[Experiment Registry] --> EE[Execution Engine]
+    EE --> PC[Provenance Capture]
+    EE --> AS[Artifact Store]
+    PC --> RR[Run Registry]
+    AS --> RR
+    EE --> RR
+``` No circular imports; no hidden global state.
 
 ## Domain concepts
 

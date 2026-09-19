@@ -4,7 +4,7 @@
 
 0. Foundation (done)
 1. Domain model + experiment registry (done)
-2. Execution engine + provenance
+2. Execution engine + provenance (done)
 3. Model adapter architecture
 4. Baseline evaluation / Model Autopsy
 5. Fault Injection Laboratory

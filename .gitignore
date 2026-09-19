@@ -49,3 +49,7 @@ node_modules/
 *.parquet
 *.joblib
 *.pkl
+
+# EXPERIONYX workspaces and execution output (registry, artifacts)
+.experionyx/
+/experiments/

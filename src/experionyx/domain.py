@@ -54,6 +54,13 @@ class RunStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class ArtifactCategory(StrEnum):
+    OUTPUT = "OUTPUT"
+    DATA = "DATA"
+    LOG = "LOG"
+    DIAGNOSTIC = "DIAGNOSTIC"
+
+
 class EvidenceTarget(StrEnum):
     """What kind of record a piece of evidence points at."""
 
@@ -90,22 +97,24 @@ _RUN_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
 # --- serialization plumbing -------------------------------------------------------------------
 
 
-def _jsonable(value: object) -> object:
+def to_jsonable(value: object) -> object:
     """Convert a domain value into plain JSON types."""
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, datetime):
         return value.isoformat()
     if is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _jsonable(getattr(value, f.name)) for f in fields(value)}
+        return {f.name: to_jsonable(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, Mapping):
-        return {k: _jsonable(x) for k, x in value.items()}
+        return {k: to_jsonable(x) for k, x in value.items()}
     if isinstance(value, tuple | list):
-        return [_jsonable(x) for x in value]
+        return [to_jsonable(x) for x in value]
     return value
 
 
-def _keys(d: Mapping[str, object], names: tuple[str, ...], extra: tuple[str, ...] = ()) -> None:
+def check_keys(
+    d: Mapping[str, object], names: tuple[str, ...], extra: tuple[str, ...] = ()
+) -> None:
     expected = set(names) | set(extra)
     if set(d) != expected:
         raise ValidationError(
@@ -113,7 +122,7 @@ def _keys(d: Mapping[str, object], names: tuple[str, ...], extra: tuple[str, ...
         )
 
 
-def _open(d: Mapping[str, object], kind: str, names: tuple[str, ...]) -> None:
+def open_payload(d: Mapping[str, object], kind: str, names: tuple[str, ...]) -> None:
     """Check the envelope (`kind`, `schema_version`) and the exact field set."""
     if d.get("kind") != kind:
         raise ValidationError(f"expected kind {kind!r}, got {d.get('kind')!r}")
@@ -122,7 +131,7 @@ def _open(d: Mapping[str, object], kind: str, names: tuple[str, ...]) -> None:
             f"unsupported payload schema_version {d.get('schema_version')!r} "
             f"(supported: {PAYLOAD_SCHEMA_VERSION})"
         )
-    _keys(d, names, ("kind", "schema_version"))
+    check_keys(d, names, ("kind", "schema_version"))
 
 
 class Entity:
@@ -137,11 +146,11 @@ class Entity:
     @property
     def id(self) -> str:
         """Deterministic ID: `<prefix>_<first 32 hex of sha256(kind + identity fields)>`."""
-        h = content_hash({"kind": self.KIND, "identity": _jsonable(self._identity())})
+        h = content_hash({"kind": self.KIND, "identity": to_jsonable(self._identity())})
         return f"{self.PREFIX}_{h[len(HASH_PREFIX) :][:_ID_HEX_LENGTH]}"
 
     def to_dict(self) -> dict[str, object]:
-        body = _jsonable(self)
+        body = to_jsonable(self)
         if not isinstance(body, dict):
             raise TypeError(f"{type(self).__name__} is not a dataclass")
         return {"kind": self.KIND, "schema_version": PAYLOAD_SCHEMA_VERSION, **body}
@@ -172,7 +181,7 @@ class _VersionedRef:
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _keys(d, ("name", "version", "digest"))
+        check_keys(d, ("name", "version", "digest"))
         return cls(v.get_str(d, "name"), v.get_str(d, "version"), v.get_opt_str(d, "digest"))
 
 
@@ -205,7 +214,7 @@ class Investigation(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(d, cls.KIND, ("name", "question", "created_at"))
+        open_payload(d, cls.KIND, ("name", "question", "created_at"))
         return cls(v.get_str(d, "name"), v.get_str(d, "question"), v.get_time(d, "created_at"))
 
 
@@ -225,7 +234,7 @@ class ConfigurationRef(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(d, cls.KIND, ("parameters",))
+        open_payload(d, cls.KIND, ("parameters",))
         return cls(v.get_mapping(d, "parameters"))
 
 
@@ -257,7 +266,9 @@ class EnvironmentSnapshot(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(d, cls.KIND, ("python_version", "os", "machine", "packages", "source_revision"))
+        open_payload(
+            d, cls.KIND, ("python_version", "os", "machine", "packages", "source_revision")
+        )
         return cls(
             v.get_str(d, "python_version"),
             v.get_str(d, "os"),
@@ -307,7 +318,7 @@ class Experiment(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
             (
@@ -370,7 +381,7 @@ class Run(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
             ("experiment_id", "environment_id", "seed", "created_at", "attempt", "status"),
@@ -385,6 +396,10 @@ class Run(Entity):
         )
 
 
+# Scalars or JSON-structured values (sequences become tuples, objects read-only mappings).
+ObservationValue = bool | int | float | str | tuple[object, ...] | Mapping[str, object]
+
+
 @dataclass(frozen=True)
 class Observation(Entity):
     """A measured value from a run. Identity is (run, name, sequence): the value is content, not
@@ -394,7 +409,7 @@ class Observation(Entity):
     PREFIX: ClassVar[str] = "obs"
     run_id: str
     name: str
-    value: bool | int | float | str
+    value: ObservationValue
     created_at: datetime
     sequence: int = 0
     unit: str | None = None
@@ -403,9 +418,9 @@ class Observation(Entity):
     def __post_init__(self) -> None:
         v.ref("run_id", self.run_id, Run.PREFIX)
         v.text("name", self.name)
-        if not isinstance(self.value, bool | int | float | str):
-            raise ValidationError(f"value must be bool/int/float/str, got {type(self.value)}")
-        v.freeze("value", self.value)  # rejects NaN/inf
+        if self.value is None:
+            raise ValidationError("value must not be None")
+        object.__setattr__(self, "value", v.freeze("value", self.value))  # JSON-only, finite
         v.timestamp("created_at", self.created_at)
         v.non_negative_int("sequence", self.sequence)
         if self.unit is not None:
@@ -418,18 +433,15 @@ class Observation(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
             ("run_id", "name", "value", "created_at", "sequence", "unit", "epistemic_kind"),
         )
-        value = v.get_raw(d, "value")
-        if not isinstance(value, bool | int | float | str):
-            raise ValidationError(f"value must be bool/int/float/str, got {type(value)}")
         return cls(
             run_id=v.get_str(d, "run_id"),
             name=v.get_str(d, "name"),
-            value=value,
+            value=v.get_raw(d, "value"),  # type: ignore[arg-type]  # validated in __post_init__
             created_at=v.get_time(d, "created_at"),
             sequence=v.get_int(d, "sequence"),
             unit=v.get_opt_str(d, "unit"),
@@ -447,14 +459,18 @@ class Artifact(Entity):
     KIND: ClassVar[str] = "artifact"
     PREFIX: ClassVar[str] = "art"
     run_id: str
-    path: str
+    name: str
+    path: str  # relative to the run's artifact directory
     digest: str
     size_bytes: int
     media_type: str
     created_at: datetime
+    category: ArtifactCategory = ArtifactCategory.OUTPUT
 
     def __post_init__(self) -> None:
         v.ref("run_id", self.run_id, Run.PREFIX)
+        v.text("name", self.name)
+        v.member("category", self.category, ArtifactCategory)
         v.relative_path("path", self.path)
         v.digest("digest", self.digest)
         v.non_negative_int("size_bytes", self.size_bytes)
@@ -467,13 +483,24 @@ class Artifact(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
-            ("run_id", "path", "digest", "size_bytes", "media_type", "created_at"),
+            (
+                "run_id",
+                "name",
+                "path",
+                "digest",
+                "size_bytes",
+                "media_type",
+                "created_at",
+                "category",
+            ),
         )
         return cls(
             run_id=v.get_str(d, "run_id"),
+            name=v.get_str(d, "name"),
+            category=v.get_enum(d, "category", ArtifactCategory),
             path=v.get_str(d, "path"),
             digest=v.get_str(d, "digest"),
             size_bytes=v.get_int(d, "size_bytes"),
@@ -507,7 +534,7 @@ class Claim(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
             ("investigation_id", "statement", "asserted_by", "created_at", "status"),
@@ -553,7 +580,7 @@ class Evidence(Entity):
 
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> Self:
-        _open(
+        open_payload(
             d,
             cls.KIND,
             ("claim_id", "target_kind", "target_id", "relation", "created_at", "note"),

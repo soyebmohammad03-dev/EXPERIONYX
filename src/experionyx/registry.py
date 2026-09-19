@@ -1,5 +1,6 @@
 """Storage-agnostic registry interface. Domain code depends on this, never on SQLite."""
 
+from contextlib import AbstractContextManager
 from typing import Protocol, TypeVar
 
 from experionyx.domain import Entity, Experiment, Run
@@ -28,6 +29,10 @@ class Registry(Protocol):
 
     def update_status(self, entity: Experiment | Run) -> None:
         """Persist a legal status transition. Everything except `status` must be unchanged."""
+        ...
+
+    def transaction(self) -> AbstractContextManager[None]:
+        """Make the operations inside the `with` block atomic (all or nothing). Nestable."""
         ...
 
     def close(self) -> None: ...

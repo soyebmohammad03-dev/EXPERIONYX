@@ -2,8 +2,8 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 1 (domain model + registry).** The typed domain model and a local SQLite
-> experiment registry exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
+> **Status: Phase 2 (execution + provenance).** The typed domain model, a local SQLite registry,
+> and an execution engine that records provenance and artifact digests exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
 > implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -39,8 +39,14 @@ See [docs/architecture.md](docs/architecture.md) and
   Claim, Evidence, and content-addressed configuration/environment records
   ([docs/domain-model.md](docs/domain-model.md))
 - Deterministic canonical hashing and IDs ([docs/identity.md](docs/identity.md))
-- Append-only registry protocol with a SQLite backend ([docs/registry.md](docs/registry.md));
-  it stores records, it does not yet execute experiments
+- Append-only registry protocol with a SQLite backend and transactions
+  ([docs/registry.md](docs/registry.md))
+- Execution engine ([docs/execution.md](docs/execution.md)): runs a Python procedure as a traced
+  Run, captures environment/source/seed/configuration ([docs/provenance.md](docs/provenance.md)),
+  hashes artifacts ([docs/artifacts.md](docs/artifacts.md)), records failures, and can request
+  replays as new runs. Replay is not reproduction verification.
+- CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
+  ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
 
 ## Hardware philosophy

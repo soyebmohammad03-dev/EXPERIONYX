@@ -308,7 +308,7 @@ def test_complete_investigation_chain_persisted_and_retrieved(tmp_path: Path) ->
         assert {r.seed for r in stored_runs} == {0, 1, 2}
         assert reg.get(EnvironmentSnapshot, stored_runs[0].environment_id) == env
         stored_obs = [o for r in stored_runs for o in reg.find(Observation, run_id=r.id)]
-        assert sorted(o.value for o in stored_obs) == [0.9, 0.91, 0.92]
+        assert sorted(float(o.value) for o in stored_obs) == [0.9, 0.91, 0.92]  # type: ignore[arg-type]
         assert reg.find(Artifact, run_id=runs[0].id) == [art]
         (stored_claim,) = reg.find(Claim, investigation_id=inv.id)
         stored_ev = reg.find(Evidence, claim_id=stored_claim.id)

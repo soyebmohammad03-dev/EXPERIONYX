@@ -55,7 +55,7 @@ def observation(r: Run) -> Observation:
 
 
 def artifact(r: Run) -> Artifact:
-    return Artifact(r.id, "out/metrics.json", DIGEST, 128, "application/json", T0)
+    return Artifact(r.id, "metrics", "out/metrics.json", DIGEST, 128, "application/json", T0)
 
 
 def claim(inv: Investigation) -> Claim:

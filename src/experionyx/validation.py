@@ -146,6 +146,17 @@ def get_time(d: Mapping[str, object], key: str) -> datetime:
         raise ValidationError(f"{key} is not an ISO-8601 timestamp") from exc
 
 
+def finite_float(field: str, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        raise ValidationError(f"{field} must be a finite number: {value!r}")
+    return float(value)
+
+
+def get_opt_float(d: Mapping[str, object], key: str) -> float | None:
+    raw = get_raw(d, key)
+    return None if raw is None else finite_float(key, raw)
+
+
 def get_enum(d: Mapping[str, object], key: str, enum: type[E]) -> E:
     v = get_str(d, key)
     try:
