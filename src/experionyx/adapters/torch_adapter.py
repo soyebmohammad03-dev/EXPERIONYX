@@ -84,7 +84,8 @@ def _tensor_bytes(h: "hashlib._Hash", t: torch.Tensor) -> None:
     """Feed a tensor's raw element bytes (any dtype) into `h` without a full extra copy."""
     flat = t.detach().to("cpu").contiguous().reshape(-1)
     if flat.numel():
-        h.update(flat.view(torch.uint8).numpy())
+        # zero-copy buffer; older numpy stubs do not declare ndarray as a Buffer
+        h.update(flat.view(torch.uint8).numpy())  # type: ignore[arg-type]
 
 
 def _rows(t: torch.Tensor) -> tuple[object, ...]:
