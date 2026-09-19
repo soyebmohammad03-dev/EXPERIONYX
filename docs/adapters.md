@@ -65,7 +65,9 @@ that scan the data (`missing_values`, torch `class_count`) run only with `deep=T
 batch count/size, `inference_seconds` (monotonic clock, excludes load), per-batch timings,
 model fingerprint, adapter name/version, device, warnings. A single timing is not a benchmark.
 Batching (`batch_slices`) is contiguous, deterministic, includes the final partial batch, and
-never copies more than one batch.
+never copies more than one batch. Batch size can change the last bits of a *float* result (BLAS
+blocking differs by platform), so the contract requires agreement to ~1e-9, not bit equality;
+labels and other non-float outputs must match exactly.
 
 ## Registry and discovery
 `AdapterRegistry.register / register_lazy / resolve / names / status`; built-ins are registered

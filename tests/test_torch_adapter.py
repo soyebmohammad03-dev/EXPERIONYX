@@ -9,7 +9,7 @@ pytest.importorskip("numpy")
 import numpy as np
 import torch
 
-from contracts import DatasetAdapterContract, ModelAdapterContract
+from contracts import DatasetAdapterContract, ModelAdapterContract, outputs_match
 from experionyx.adapters.capabilities import (
     DatasetCapability,
     DeviceKind,
@@ -109,7 +109,7 @@ def test_outputs_match_a_direct_forward_pass_and_are_plain_python(tmp_path: Path
     result = adapter.predict(x)
     assert np.allclose(np.array(result.outputs), expected.numpy(), atol=1e-6)
     assert all(type(v) is float for row in result.outputs for v in row)  # type: ignore[attr-defined]
-    assert adapter.batch_predict(x, 4).outputs == result.outputs  # batching does not change values
+    assert outputs_match(adapter.batch_predict(x, 4).outputs, result.outputs)  # up to rounding
     assert result.device.resolved is DeviceKind.CPU
     with pytest.raises(UnsupportedCapabilityError):
         adapter.predict_proba(x)  # softmax is not assumed

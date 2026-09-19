@@ -121,7 +121,7 @@ def test_predictions_match_the_estimator_and_are_plain_python(tmp_path: Path) ->
     assert np.allclose(np.array(proba.outputs), est.predict_proba(X[:20]))
     assert np.allclose(np.array(proba.outputs).sum(axis=1), 1.0)
     assert proba.capability is ModelCapability.PREDICT_PROBA
-    assert adapter.batch_predict(X[:20], 6).outputs == result.outputs
+    assert adapter.batch_predict(X[:20], 6).outputs == result.outputs  # integer labels: exact
 
 
 def test_capabilities_reflect_what_the_estimator_really_supports(tmp_path: Path) -> None:

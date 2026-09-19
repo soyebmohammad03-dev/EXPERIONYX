@@ -32,6 +32,17 @@ _OPERATIONS: dict[ModelCapability, Callable[[ModelAdapter, object], InferenceRes
 }
 
 
+def outputs_match(a: object, b: object) -> bool:
+    """Exact for ints/strings/structure; floats within rounding. Batch size may legitimately
+    change the last bits of a float result (BLAS blocking differs by platform), so this contract
+    demands agreement to ~1e-9, not bit equality."""
+    if isinstance(a, float) and isinstance(b, float):
+        return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12)
+    if isinstance(a, tuple) and isinstance(b, tuple):
+        return len(a) == len(b) and all(outputs_match(x, y) for x, y in zip(a, b, strict=True))
+    return a == b
+
+
 def _n(inputs: object) -> int:
     return len(inputs)  # type: ignore[arg-type]
 
@@ -113,7 +124,7 @@ class ModelAdapterContract:
         assert result.batch_size == batch_size
         assert result.batch_count == math.ceil(n / batch_size)
         assert len(result.batch_seconds) == result.batch_count
-        assert result.outputs == adapter.predict(valid_inputs).outputs
+        assert outputs_match(result.outputs, adapter.predict(valid_inputs).outputs)
         assert result.sample_count == n
 
     @pytest.mark.parametrize("bad", [0, -1, True, 1.5])
