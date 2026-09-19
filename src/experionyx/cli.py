@@ -35,10 +35,19 @@ from experionyx.evaluation.config import (
     ScoreSource,
 )
 from experionyx.evaluation.engine import PROCEDURE
+from experionyx.evaluation.loading import load_evaluation
 from experionyx.evaluation.metrics import default_metric_registry
 from experionyx.evaluation.results import EvaluationResult
 from experionyx.evaluation.serial import from_jsonable
 from experionyx.execution import ExecutionResult, Executor, resolve_procedure, run_states
+from experionyx.faults.degradation import measure_degradation, measure_latency
+from experionyx.faults.demos import FAULT_DEMOS, run_fault_demo
+from experionyx.faults.design import FaultDesign, FaultLimits, SweepSpec
+from experionyx.faults.entities import FaultExperiment, FaultTrial
+from experionyx.faults.lab import FaultExperimentResult, run_fault_experiment
+from experionyx.faults.library import default_fault_registry
+from experionyx.faults.report import analysis_run_id, load_analysis, read_artifact, summary_rows
+from experionyx.faults.spec import FaultRegistry, FaultScope, FaultSpec, ScopeKind
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 
@@ -414,6 +423,199 @@ def _cmd_evaluation_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_faults_list(_: argparse.Namespace) -> int:
+    for ft in default_fault_registry().all():
+        reqs = ",".join(sorted(r.value for r in ft.requires)) or "-"
+        state = "" if ft.implemented else "  [NOT IMPLEMENTED: reserved]"
+        head = f"{ft.name:22} v{ft.version} {ft.category.value:20} {ft.target.value:6}"
+        print(f"{head} requires={reqs:26} stochastic={ft.stochastic}{state}")
+    return 0
+
+
+def _cmd_fault_inspect(args: argparse.Namespace) -> int:
+    ft = default_fault_registry().resolve(args.name)
+    params = []
+    for f in dataclasses.fields(ft.params_type):
+        default = None if f.default is dataclasses.MISSING else f.default
+        params.append(
+            {
+                "name": f.name,
+                "type": getattr(f.type, "__name__", str(f.type)),
+                "required": f.default is dataclasses.MISSING,
+                "default": default,
+                "doc": ft.param_docs.get(f.name, ""),
+            }
+        )
+    _dump({"name": ft.name, "version": ft.version, "category": ft.category.value, "target": ft.target.value,
+           "description": ft.description, "requires": sorted(r.value for r in ft.requires),
+           "stochastic": ft.stochastic, "implemented": ft.implemented, "sweepable": list(ft.sweepable()),
+           "parameters": params})  # fmt: skip
+    return 0
+
+
+def _spec_from_args(args: argparse.Namespace, fr: FaultRegistry) -> FaultSpec:
+    if args.spec_file:
+        return fr.from_dict(json.loads(Path(args.spec_file).read_text(encoding="utf-8")))
+    if not args.type:
+        raise ExperionyxError("give --type (with --param key=value ...) or --spec-file")
+    if args.scope_fraction is not None and args.scope_class is not None:
+        raise ExperionyxError("choose one scope: --scope-fraction or --scope-class")
+    scope = FaultScope()
+    if args.scope_fraction is not None:
+        scope = FaultScope(ScopeKind.RANDOM_SUBSET, fraction=args.scope_fraction)
+    elif args.scope_class is not None:
+        label = _options([f"x={args.scope_class}"])["x"]
+        scope = FaultScope(
+            ScopeKind.CLASS, label=label if isinstance(label, int | str) else str(label)
+        )
+    return fr.make(args.type, seed=args.seed, scope=scope, **_options(args.param))  # type: ignore[arg-type]
+
+
+def _print_fault_result(reg: SqliteRegistry, workspace: str, result: FaultExperimentResult) -> int:
+    store = LocalArtifactStore(Path(workspace) / EXPERIMENTS_DIR)
+    print(f"fault experiment: {result.fault_experiment.id} ({result.fault_experiment.status})")
+    print(f"baseline run:     {result.baseline_run_id}")
+    print(f"analysis run:     {result.analysis_run_id} ({result.analysis_status})")
+    statuses: dict[str, int] = {}
+    for t in result.trials:
+        statuses[t.status.value] = statuses.get(t.status.value, 0) + 1
+    print(f"trials:           {statuses}")
+    if result.analysis_status is not RunStatus.COMPLETED:
+        return 1
+    analysis = load_analysis(reg, store, result.fault_experiment.id)
+    print(
+        f"primary metric:   {analysis.primary_metric} ({analysis.primary_direction}), baseline {analysis.baseline_value}"
+    )
+    for row in summary_rows(analysis):
+        value = "" if row["value"] is None else f"{row['parameter']}={row['value']:g}"
+        det = row["deterioration_mean"]
+        print(
+            f"  {value:16} trials {row['trials']:6} faulted_mean={row['faulted_mean']}  deterioration={'n/a' if det is None else format(det, '.6g')}  {row['classification']}"
+        )
+    print(f"inspect with: experionyx fault experiment inspect {result.fault_experiment.id}")
+    return 0
+
+
+def _run_fault(args: argparse.Namespace, sweep: SweepSpec | None, seeds: tuple[int, ...]) -> int:
+    fr = default_fault_registry()
+    spec = _spec_from_args(args, fr)
+    evaluation = _evaluation_config(args)
+    limits = FaultLimits(max_failed_trials=args.max_failed_trials)
+    design = FaultDesign(
+        spec.to_dict(),
+        evaluation,
+        seeds=seeds,
+        sweep=sweep,
+        primary_metric=args.primary_metric,
+        limits=limits,
+    )
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        name = args.name or f"{spec.type} {'sweep ' + sweep.parameter if sweep else 'run'}"
+        result = run_fault_experiment(
+            reg,
+            store,
+            _executor(reg, args.workspace),
+            model_id=args.model,
+            dataset_id=args.dataset,
+            base_spec=spec,
+            fault_registry=fr,
+            design=design,
+            name=name,
+            source_root=Path.cwd(),
+            baseline_run_id=args.baseline_run,
+        )
+        return _print_fault_result(reg, args.workspace, result)
+
+
+def _cmd_fault_run(args: argparse.Namespace) -> int:
+    return _run_fault(args, None, (args.seed,))
+
+
+def _cmd_fault_sweep(args: argparse.Namespace) -> int:
+    name, sep, raw = args.sweep.partition("=")
+    if not (name and sep and raw):
+        raise ExperionyxError("--sweep expects parameter=v1,v2,...")
+    try:
+        values = tuple(float(x) for x in raw.split(","))
+        seeds = tuple(int(x) for x in args.seeds.split(","))
+    except ValueError as exc:
+        raise ExperionyxError(f"invalid sweep values or seeds: {exc}") from exc
+    return _run_fault(args, SweepSpec(name, values), seeds)
+
+
+def _cmd_fault_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        base, treat = (
+            load_evaluation(reg, store, args.baseline_run),
+            load_evaluation(reg, store, args.treatment_run),
+        )
+        fault = read_artifact(reg, store, args.treatment_run, "fault/fault.json")
+    _dump({
+        "baseline_run": args.baseline_run, "treatment_run": args.treatment_run,
+        "fault": {k: fault[k] for k in ("fault_id", "fault", "seed", "scope", "affected_samples", "total_samples", "timings_seconds")} if isinstance(fault, dict) else None,
+        "degradation": [_json(d) for d in measure_degradation(base, treat)],
+        "latency": _json(measure_latency(base, treat)),
+        "note": "deterioration > 0 means worse (direction-aware); this is a measurement, not a verdict",
+    })  # fmt: skip
+    return 0
+
+
+def _cmd_fault_experiment_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        fx = reg.get(FaultExperiment, args.id)
+        trials = reg.find(FaultTrial, fault_experiment_id=fx.id)
+        document: dict[str, object] = {
+            "fault_experiment": _record(fx),
+            "trials": [
+                {
+                    "point": t.point_index,
+                    "repeat": t.repeat_index,
+                    "parameter": t.parameter_name,
+                    "value": t.parameter_value,
+                    "seed": t.seed,
+                    "status": t.status.value,
+                    "fault_id": t.fault_id,
+                    "treatment_run": t.treatment_run_id,
+                    "reason": t.reason,
+                }
+                for t in sorted(trials, key=lambda x: (x.point_index, x.repeat_index))
+            ],
+        }
+        try:
+            analysis = load_analysis(reg, store, fx.id)
+            document.update(
+                {
+                    "analysis_run": analysis_run_id(reg, fx.id),
+                    "primary_metric": analysis.primary_metric,
+                    "summary": summary_rows(analysis),
+                    "warnings": list(analysis.warnings),
+                }
+            )
+            if args.full:
+                document["analysis"] = _json(analysis)
+        except ExperionyxError as exc:
+            document["analysis_error"] = str(exc)
+    _dump(document)
+    return 0
+
+
+def _cmd_fault_demo(args: argparse.Namespace) -> int:
+    ws = Path(args.workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+    reg = SqliteRegistry(ws / REGISTRY_FILE)
+    try:
+        code = 0
+        for result in run_fault_demo(args.name, ws):
+            print(f"\n== {result.fault_experiment.name}")
+            code |= _print_fault_result(reg, args.workspace, result)
+        return code
+    finally:
+        reg.close()
+
+
 def _report(result: ExecutionResult) -> int:
     print(f"run: {result.run.id}")
     print(f"status: {result.status}")
@@ -566,6 +768,59 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("run_a")
     p.add_argument("run_b")
     p.set_defaults(func=_cmd_evaluation_compare)
+
+    add("faults", _cmd_faults_list, "list the registered fault types")
+    fault = group("fault", "fault-injection experiments")
+    p = fault.add_parser("inspect", help="one fault type: parameters, requirements, semantics")
+    p.add_argument("name")
+    p.set_defaults(func=_cmd_fault_inspect)
+
+    def fault_args(q: argparse.ArgumentParser, *, sweep: bool) -> None:
+        q.add_argument("--model", required=True, help="registered model ID (mdl_...)")
+        eval_args(q)
+        q.add_argument("--type", help="fault type (see `experionyx faults`)")
+        q.add_argument("--param", action="append", default=[], help="fault parameter key=value")
+        q.add_argument("--spec-file", help="a complete FaultSpec JSON (needed for compound faults)")
+        q.add_argument("--scope-fraction", type=float, help="apply to this share of samples")
+        q.add_argument("--scope-class", help="apply to samples of this true class")
+        q.add_argument("--primary-metric", help="metric the effect is classified on")
+        q.add_argument(
+            "--baseline-run", help="reuse a COMPLETED baseline run with identical configuration"
+        )
+        q.add_argument(
+            "--max-failed-trials",
+            type=int,
+            help="early termination: skip remaining trials after N failures",
+        )
+        q.add_argument("--name", help="experiment name")
+        if sweep:
+            q.add_argument(
+                "--sweep", required=True, help="parameter=v1,v2,... (each value is a real run)"
+            )
+            q.add_argument(
+                "--seeds", default="0", help="comma-separated seeds (each is a real run per point)"
+            )
+
+    p = fault.add_parser("run", help="one fault, one seed: control run + faulted run + analysis")
+    fault_args(p, sweep=False)
+    p.set_defaults(func=_cmd_fault_run)
+    p = fault.add_parser("sweep", help="a parameter sweep with repeated seeds")
+    fault_args(p, sweep=True)
+    p.set_defaults(func=_cmd_fault_sweep)
+    p = fault.add_parser("compare", help="degradation of a treatment run against its baseline run")
+    p.add_argument("baseline_run")
+    p.add_argument("treatment_run")
+    p.set_defaults(func=_cmd_fault_compare)
+    p = fault.add_parser("demo", help="run real example fault experiments")
+    p.add_argument("name", choices=FAULT_DEMOS)
+    p.set_defaults(func=_cmd_fault_demo)
+    fexp = fault.add_parser("experiment", help="fault experiment records").add_subparsers(
+        dest="fexp_command", required=True
+    )
+    p = fexp.add_parser("inspect", help="design, trials and analysis of a fault experiment")
+    p.add_argument("id", help="fault experiment ID (fxp_...)")
+    p.add_argument("--full", action="store_true", help="include the complete analysis")
+    p.set_defaults(func=_cmd_fault_experiment_inspect)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

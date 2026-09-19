@@ -38,11 +38,12 @@ from experionyx.errors import (
     SchemaVersionError,
     ValidationError,
 )
+from experionyx.faults.entities import FaultAnalysis, FaultExperiment, FaultTrial
 from experionyx.hashing import canonical_json, content_hash
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 
-DB_SCHEMA_VERSION = 3  # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets
+DB_SCHEMA_VERSION = 4  # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,34 @@ _SPECS: dict[type[Entity], _Spec] = {
     ),
     RegisteredDataset: _Spec(
         "datasets", plain=("name", "version", "adapter", "adapter_version", "fingerprint"), since=3
+    ),
+    FaultExperiment: _Spec(
+        "fault_experiments",
+        refs=(
+            ("investigation_id", Investigation),
+            ("baseline_experiment_id", Experiment),
+            ("baseline_run_id", Run),
+        ),
+        plain=("status",),
+        mutable=True,
+        since=4,
+    ),
+    FaultTrial: _Spec(
+        "fault_trials",
+        refs=(
+            ("fault_experiment_id", FaultExperiment),
+            ("baseline_run_id", Run),
+            ("treatment_experiment_id", Experiment),
+            ("treatment_run_id", Run),
+        ),
+        plain=("status", "family_id", "fault_id"),
+        optional=("treatment_experiment_id", "treatment_run_id"),
+        since=4,
+    ),
+    FaultAnalysis: _Spec(
+        "fault_analyses",
+        refs=(("fault_experiment_id", FaultExperiment), ("run_id", Run)),
+        since=4,
     ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
@@ -179,9 +208,16 @@ def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
     _rewrite_payloads(conn, Provenance, provenance)
 
 
+def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
+    """Phase 5: fault experiments, trials and analyses (new tables only; no payload changes)."""
+    for statement in _ddl(upto=4, since=4):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
+    3: _migrate_3_to_4,
 }
 
 
@@ -291,6 +327,8 @@ class SqliteRegistry:
                 self._check_outcome(entity)
             elif isinstance(entity, RegisteredModel | RegisteredDataset):
                 self._check_unique_binding(entity)
+            elif isinstance(entity, FaultTrial):
+                self._check_fault_trial(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -337,6 +375,21 @@ class SqliteRegistry:
             raise ValidationError(
                 "provenance input does not match the experiment's registered reference"
             )
+
+    def _check_fault_trial(self, t: FaultTrial) -> None:
+        """A trial must share its fault experiment's control run and, if it has a treatment run,
+        that run must belong to the treatment experiment it names."""
+        fx = self.get(FaultExperiment, t.fault_experiment_id)
+        if t.baseline_run_id != fx.baseline_run_id:
+            raise ValidationError(
+                "a trial's control run must be its fault experiment's baseline run"
+            )
+        if t.treatment_run_id is not None:
+            run = self.get(Run, t.treatment_run_id)
+            if t.treatment_experiment_id != run.experiment_id:
+                raise ValidationError(
+                    "treatment run does not belong to the named treatment experiment"
+                )
 
     def _check_unique_binding(self, record: RegisteredModel | RegisteredDataset) -> None:
         """A (name, version) may only ever refer to one fingerprint per adapter version."""
@@ -398,12 +451,15 @@ class SqliteRegistry:
         ).fetchall()
         return [self._decode(cls, r[0], r[1], r[2]) for r in rows]
 
-    def update_status(self, entity: Experiment | Run) -> None:
+    def update_status(self, entity: Experiment | Run | FaultExperiment) -> None:
         with self.transaction():
-            current: Experiment | Run
-            expected: Experiment | Run
+            current: Experiment | Run | FaultExperiment
+            expected: Experiment | Run | FaultExperiment
             if isinstance(entity, Experiment):
                 current = self.get(Experiment, entity.id)
+                expected = current.with_status(entity.status)
+            elif isinstance(entity, FaultExperiment):
+                current = self.get(FaultExperiment, entity.id)
                 expected = current.with_status(entity.status)
             else:
                 current = self.get(Run, entity.id)

@@ -28,7 +28,7 @@ jobs:
       - name: Install
         run: |
           pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev,sklearn,torch]"
+          pip install -e ".[dev,sklearn,torch,faults]"
       - name: Tool and framework versions
         run: pip list 2>/dev/null | grep -Ei "^(pytest|ruff|mypy|numpy|scikit-learn|torch|joblib|scipy) "
       # Each check runs even if an earlier one failed, so a single run reports every problem.

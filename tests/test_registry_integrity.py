@@ -283,7 +283,7 @@ def test_schema_contains_all_tables_and_is_versioned(tmp_path: Path) -> None:
     SqliteRegistry(path).close()
     with sqlite3.connect(path) as raw:
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 4
     assert {
         "provenance",
         "outcomes",

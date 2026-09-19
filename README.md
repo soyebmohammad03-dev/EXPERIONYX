@@ -2,10 +2,11 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 4 (baseline evaluation + model autopsy).** The typed domain model, a local SQLite registry,
+> **Status: Phase 5 (fault injection laboratory).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
-> (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
+> (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
+> treatment runs; degradation with direction-aware metrics) exist. No laboratory capability (autopsy, fault injection, drift, statistics, reports) is
 > implemented yet. Everything below marked *planned* is an architecture target, not a feature.
 
 ## Problem
@@ -57,6 +58,11 @@ See [docs/architecture.md](docs/architecture.md) and
   latency, transparent rule-based findings linked to evidence, and structured comparison. It
   reports measurements and observations, not causes
   ([docs/observation-vs-conclusion.md](docs/observation-vs-conclusion.md)).
+- Fault injection ([docs/faults.md](docs/faults.md)): a versioned fault registry (noise, dropout,
+  missingness, scaling, occlusion, label corruption, compound faults), deterministic seeding and
+  scopes, real parameter sweeps and repeated seeds against a baseline control, degradation
+  measurement, transparent effect thresholds, and evidence links. It measures effects; it does not
+  declare models failed.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
@@ -69,11 +75,11 @@ resumable and bounded-parallel execution. No paid APIs, GPUs or clusters in the 
 ## Development
 
 Requires Python 3.11+. The core has no runtime dependencies; frameworks are extras:
-`pip install -e ".[sklearn]"`, `".[torch]"` (add `dev` for the test tools).
+`pip install -e ".[sklearn]"`, `".[torch]"`, `".[faults]"` (numpy, for fault injection); add `dev` for the test tools.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,sklearn,torch]"
+pip install -e ".[dev,sklearn,torch,faults]"
 pytest && ruff check . && ruff format --check . && mypy
 ```
 

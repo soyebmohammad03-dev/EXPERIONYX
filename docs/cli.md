@@ -28,6 +28,13 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx evaluate --model mdl_… --dataset dst_… [--split S --batch-size N --metric M… --score-source X --bins N --bootstrap-resamples N --config FILE --seed N]` | run a baseline evaluation as a real run (a `--config` file is strict: unknown fields fail) |
 | `experionyx model autopsy mdl_… --dataset dst_… [same options]` | evaluate, then print the model profile and findings |
 | `experionyx evaluation inspect <run> [--full]` | summary (or the full result) of a run's stored evaluation; verifies the artifact digest |
+| `experionyx faults` | list fault types (reserved, unimplemented ones are marked) |
+| `experionyx fault inspect <name>` | a fault's parameters, requirements and semantics |
+| `experionyx fault run --model mdl_… --dataset dst_… --type T --param k=v … --seed N [--scope-fraction F \| --scope-class C] [--spec-file F]` | one seeded fault: baseline control + faulted run + analysis |
+| `experionyx fault sweep … --sweep param=v1,v2,… --seeds 1,2,3 [--baseline-run RUN --max-failed-trials N]` | a real parameter sweep with repeated seeds |
+| `experionyx fault compare <baseline-run> <treatment-run>` | direction-aware degradation of one treatment against its control |
+| `experionyx fault experiment inspect <fxp_…> [--full]` | design, trials and analysis of a fault experiment |
+| `experionyx fault demo {tabular,tensor,labels}` | real example fault experiments |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`

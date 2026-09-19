@@ -1,12 +1,13 @@
 # Architecture
 
-> **Current state:** Phase 4. Implemented: the domain model ([domain-model.md](domain-model.md)),
+> **Current state:** Phase 5. Implemented: the domain model ([domain-model.md](domain-model.md)),
 > hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite backend
 > ([registry.md](registry.md)), an execution engine ([execution.md](execution.md)), provenance
 > capture ([provenance.md](provenance.md)), a local artifact store ([artifacts.md](artifacts.md)), a framework-agnostic model/dataset adapter layer with
 > sklearn and PyTorch implementations ([adapters.md](adapters.md),
 > [model-dataset-identity.md](model-dataset-identity.md)) a baseline evaluation and autopsy engine ([evaluation.md](evaluation.md),
-> [observation-vs-conclusion.md](observation-vs-conclusion.md)) and a CLI ([cli.md](cli.md)).
+> [observation-vs-conclusion.md](observation-vs-conclusion.md)), a fault injection laboratory
+> ([faults.md](faults.md)) and a CLI ([cli.md](cli.md)).
 > Everything else below is **planned** and will be introduced
 > incrementally.
 
@@ -47,6 +48,8 @@ flowchart LR
     MD --> PROC[Inference]
     PROC --> EVAL[Evaluation: metrics, calibration, slices, findings]
     EVAL --> RR
+    EVAL --> FAULT[Fault laboratory: faulted evaluation vs control]
+    FAULT --> RR
     PROC --> RR
     EE --> PC[Provenance Capture]
     EE --> AS[Artifact Store]

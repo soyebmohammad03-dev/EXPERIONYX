@@ -164,6 +164,11 @@ class ListDatasetAdapter(BaseDatasetAdapter):
         except (OSError, ValueError, KeyError) as exc:
             raise DatasetLoadError(f"cannot load {source}: {exc}") from exc
 
+    def _target_schema(self) -> TensorSchema | None:
+        if self._payload.get("task") != "CLASSIFICATION" or self._targets is None:
+            return None
+        return TensorSchema(class_labels=tuple(sorted(set(self._targets))))
+
     def _feature_names(self) -> tuple[str, ...] | None:
         names = self._payload.get("feature_names")
         return tuple(str(n) for n in names) if isinstance(names, list) else None
@@ -210,6 +215,7 @@ class ListDatasetAdapter(BaseDatasetAdapter):
                 shape=(None, len(self._rows[0])),
                 feature_names=self._feature_names(),
             ),
+            target_schema=self._target_schema(),
             splits={k: len(v) for k, v in self._splits.items()},
             missing_values=0 if deep else None,
             capabilities=tuple(self.capabilities),
@@ -292,8 +298,11 @@ class ThresholdClassifierAdapter(BaseModelAdapter):
     def predict(
         self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
     ) -> InferenceResult:
+        inputs = inputs.tolist() if hasattr(inputs, "tolist") else inputs
         if not isinstance(inputs, list) or not inputs:
             raise InferenceError("inputs must be a non-empty list of rows")
+        if any(v != v for r in inputs for v in r):  # NaN, like most real estimators
+            raise InferenceError("input contains NaN")
         return self._result(
             ModelCapability.PREDICT, [1 if r[0] > self._t else 0 for r in inputs], sample_ids
         )
@@ -302,6 +311,7 @@ class ThresholdClassifierAdapter(BaseModelAdapter):
         self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
     ) -> InferenceResult:
         self.require(ModelCapability.PREDICT_PROBA)
+        inputs = inputs.tolist() if hasattr(inputs, "tolist") else inputs
         if not isinstance(inputs, list) or not inputs:
             raise InferenceError("inputs must be a non-empty list of rows")
         rows: list[object] = []

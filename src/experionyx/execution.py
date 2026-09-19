@@ -150,6 +150,15 @@ class RunContext:
     inputs: AdapterInputs | None = None  # record IDs and fingerprints of the bound model/dataset
 
     @property
+    def registry(self) -> Registry:
+        """Read/write access to the run's registry (for analyses that read other runs)."""
+        return self.recorder.registry
+
+    @property
+    def store(self) -> ArtifactStore:
+        return self.recorder.store
+
+    @property
     def parameters(self) -> Mapping[str, object]:
         return self.configuration.parameters
 

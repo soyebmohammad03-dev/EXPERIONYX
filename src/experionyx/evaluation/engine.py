@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import IO
 
+from experionyx.adapters.base import DatasetAdapter
 from experionyx.adapters.capabilities import DatasetCapability, ModelCapability, TaskType
 from experionyx.domain import (
     Artifact,
@@ -148,9 +149,15 @@ def _resolve_task(config: EvaluationConfig, model_task: TaskType, data_task: Tas
 
 
 def evaluate(
-    ctx: RunContext, config: EvaluationConfig, metric_registry: MetricRegistry | None = None
+    ctx: RunContext,
+    config: EvaluationConfig,
+    metric_registry: MetricRegistry | None = None,
+    dataset: DatasetAdapter | None = None,
 ) -> EvaluationResult:
-    model, dataset = ctx.model, ctx.dataset
+    """Evaluate the run's bound model. `dataset` overrides the bound dataset (used by the fault
+    laboratory to evaluate a derived, faulted view of it with the *same* engine)."""
+    model = ctx.model
+    dataset = dataset if dataset is not None else ctx.dataset
     if model is None or dataset is None:
         raise EvaluationError("evaluation needs a registered model and dataset bound to the run")
     mmeta, dmeta = model.metadata(), dataset.metadata()

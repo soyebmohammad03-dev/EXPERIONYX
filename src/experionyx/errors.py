@@ -107,3 +107,19 @@ class InferenceError(AdapterError):
 
 class EvaluationError(ExperionyxError):
     """An evaluation request is invalid or cannot be carried out as configured."""
+
+
+class FaultError(ExperionyxError):
+    """Base class for fault-injection failures."""
+
+
+class FaultNotFoundError(FaultError, LookupError):
+    """No fault type (or version) is registered under the requested name."""
+
+
+class FaultCompatibilityError(FaultError):
+    """A fault cannot be applied to the given inputs, labels or model."""
+
+
+class FaultLimitError(FaultError):
+    """A fault experiment exceeds a configured safety limit; nothing was run."""

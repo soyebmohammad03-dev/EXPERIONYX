@@ -35,6 +35,7 @@ from experionyx.execution import (
     resolve_procedure,
     run_states,
 )
+from experionyx.faults.entities import FaultExperiment
 from experionyx.provenance import (
     FailureStage,
     Provenance,
@@ -297,7 +298,7 @@ class FailingRegistry(SqliteRegistry):
             raise OSError("simulated persistence failure")
         super().add(entity)
 
-    def update_status(self, entity: Experiment | Run) -> None:
+    def update_status(self, entity: Experiment | Run | FaultExperiment) -> None:
         if self.fail_on_final_status and entity.status is RunStatus.COMPLETED:
             raise OSError("simulated persistence failure")
         super().update_status(entity)

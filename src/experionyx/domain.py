@@ -85,6 +85,7 @@ _EXPERIMENT_TRANSITIONS: Mapping[ExperimentStatus, frozenset[ExperimentStatus]] 
     _S.FAILED: frozenset(),
     _S.CANCELLED: frozenset(),
 }
+EXPERIMENT_TRANSITIONS = _EXPERIMENT_TRANSITIONS  # reused by other lifecycle-bearing entities
 _R = RunStatus
 _RUN_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
     _R.PENDING: frozenset({_R.RUNNING, _R.FAILED}),

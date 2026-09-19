@@ -202,3 +202,17 @@ def test_current_and_future_versions(tmp_path: Path) -> None:
 def test_in_memory_databases_need_no_backup() -> None:
     SqliteRegistry(":memory:").close()
     assert json.dumps({"ok": True})
+
+
+def test_phase4_database_migrates_to_fault_tables_and_keeps_everything(tmp_path: Path) -> None:
+    path = tmp_path / "v3.sqlite"
+    made = make_database(path, 3)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]
+        (prov,) = reg.find(Provenance)
+        assert prov.inputs is None
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"fault_experiments", "fault_trials", "fault_analyses"} <= tables
+    assert (tmp_path / "v3.sqlite.v3.bak").is_file()

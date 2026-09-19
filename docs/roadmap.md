@@ -7,7 +7,7 @@
 2. Execution engine + provenance (done)
 3. Model adapter architecture (done)
 4. Baseline evaluation / Model Autopsy (done)
-5. Fault Injection Laboratory
+5. Fault Injection Laboratory (done)
 6. Failure Discovery
 7. Reproducibility + Statistical Engine
 8. Drift Laboratory
