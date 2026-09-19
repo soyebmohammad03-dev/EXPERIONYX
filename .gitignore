@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# macOS / IDEs
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node / frontend (future)
+node_modules/
+
+# Experiment outputs, data, models, local DBs (never committed by default)
+/data/
+/datasets/
+/artifacts/
+/runs/
+/outputs/
+/models/
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.npy
+*.npz
+*.parquet
+*.joblib
+*.pkl
