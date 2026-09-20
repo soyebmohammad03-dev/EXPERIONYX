@@ -7,6 +7,7 @@ Datasets are map-style `torch.utils.data.Dataset`s or tensor files read with
 results may differ across hardware backends (no cross-device bitwise determinism is claimed).
 """
 
+import copy
 import hashlib
 import pickle
 import time
@@ -15,6 +16,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar, Self
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset, default_collate
 
@@ -238,6 +240,42 @@ class TorchModelAdapter(BaseModelAdapter):
             capabilities=tuple(self.capabilities),
         )
 
+    # -- optional ParameterAccess (Model Stress Laboratory) -------------------------------------
+
+    def parameter_arrays(self) -> dict[str, np.ndarray]:
+        """Copies of every floating-point entry of the state dict, as numpy arrays."""
+        return {
+            name: t.detach().cpu().numpy().copy()
+            for name, t in self._module.state_dict().items()
+            if t.is_floating_point()
+        }
+
+    def with_parameters(self, arrays: Mapping[str, object]) -> "TorchModelAdapter":
+        current = self.parameter_arrays()
+        clone = copy.deepcopy(self._module)
+        state = clone.state_dict()
+        for name, value in arrays.items():
+            if name not in current:
+                raise InvalidModelError(f"{name!r} is not a floating-point parameter of this model")
+            arr = np.asarray(value)
+            if arr.shape != current[name].shape:
+                raise InvalidModelError(
+                    f"replacement for {name!r} must have shape {current[name].shape}"
+                )
+            state[name].copy_(torch.as_tensor(arr, dtype=state[name].dtype))
+        return type(self)(
+            clone,
+            version=self._version,
+            device=DeviceKind.CPU
+            if self.device.resolved is DeviceKind.CPU
+            else self.device.resolved,
+            task=self._task,
+            input_shape=self._input_shape,
+            size_bytes=self._size_bytes,
+            serialization_format=self._format,
+            load_seconds=self.load_seconds,
+        )
+
     # -- inference ----------------------------------------------------------------------------
 
     def _tensor(self, inputs: Inputs) -> torch.Tensor:
@@ -404,9 +442,12 @@ class TorchDatasetAdapter(BaseDatasetAdapter):
         }
         task = TaskType(str(options.get("task", TaskType.UNKNOWN.value)))
         return cls(
-            ds, version=version, task=task, splits=raw_splits,
+            ds,
+            version=version,
+            task=task,
+            splits=raw_splits,
             source={"format": "torch-tensors", "file_sha256": file_digest},
-        )  # fmt: skip
+        )
 
     @property
     def capabilities(self) -> frozenset[DatasetCapability]:

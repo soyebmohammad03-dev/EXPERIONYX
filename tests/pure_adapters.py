@@ -6,7 +6,7 @@ import json
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import ClassVar, Self
+from typing import Any, ClassVar, Self
 
 from experionyx.adapters.base import (
     BaseDatasetAdapter,
@@ -321,6 +321,128 @@ class ThresholdClassifierAdapter(BaseModelAdapter):
             p1 = min(max(float(r[0]) / 10.0, 0.0), 1.0)
             rows.append((1.0 - p1, p1))
         return self._result(ModelCapability.PREDICT_PROBA, rows, sample_ids)
+
+    def batch_predict(
+        self, inputs: Inputs, batch_size: int, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        return self.predict(inputs, sample_ids=sample_ids)
+
+
+class LinearProbaAdapter(BaseModelAdapter):
+    """A binary linear classifier stored as JSON `{"coef": [...], "intercept": b}` with
+    predicted probabilities (sigmoid) and the optional ParameterAccess capability. It gives stress
+    tests a controlled, framework-free model whose parameters can be perturbed."""
+
+    NAME: ClassVar[str] = "linear"
+    VERSION: ClassVar[str] = "1.0.0"
+    FRAMEWORK: ClassVar[str] = "pure-python"
+    POSSIBLE_CAPABILITIES: ClassVar[frozenset[ModelCapability]] = frozenset(
+        {ModelCapability.PREDICT, ModelCapability.BATCH_PREDICT, ModelCapability.PREDICT_PROBA}
+    )
+
+    def __init__(self, coef: list[float], intercept: float, fingerprint: str, version: str) -> None:
+        self._coef, self._b, self._fp, self._version = (
+            list(coef),
+            float(intercept),
+            fingerprint,
+            version,
+        )
+        self.load_seconds = 0.0
+        self.device = DeviceInfo.cpu()
+
+    @classmethod
+    def load(
+        cls, source: str | Path, *, version: str, device: DeviceKind, options: Mapping[str, object]
+    ) -> Self:
+        try:
+            digest, _ = sha256_file(Path(source))
+            data = json.loads(Path(source).read_text())
+        except (OSError, ValueError) as exc:
+            raise ModelLoadError(f"cannot load {source}: {exc}") from exc
+        return cls([float(c) for c in data["coef"]], float(data["intercept"]), digest, version)
+
+    @property
+    def capabilities(self) -> frozenset[ModelCapability]:
+        return self.POSSIBLE_CAPABILITIES
+
+    def fingerprint(self) -> str:
+        return self._fp
+
+    def metadata(self) -> ModelMetadata:
+        return ModelMetadata(
+            adapter=self.NAME,
+            adapter_version=self.VERSION,
+            framework=self.FRAMEWORK,
+            model_type="LinearProba",
+            version=self._version,
+            fingerprint=self._fp,
+            task=TaskType.CLASSIFICATION,
+            output_schema=TensorSchema(shape=(None,), class_labels=(0, 1)),
+            capabilities=tuple(self.capabilities),
+        )
+
+    # -- ParameterAccess -------------------------------------------------------------------------
+
+    def parameter_arrays(self) -> dict[str, Any]:
+        import numpy as np
+
+        return {
+            "coef_": np.array(self._coef, dtype=float),
+            "intercept_": np.array([self._b], dtype=float),
+        }
+
+    def with_parameters(self, arrays: Mapping[str, Any]) -> "LinearProbaAdapter":
+        coef = [float(x) for x in arrays.get("coef_", self._coef)]
+        b = float(next(iter(arrays.get("intercept_", [self._b]))))
+        return LinearProbaAdapter(coef, b, self._fp, self._version)
+
+    # -- inference -------------------------------------------------------------------------------
+
+    def _p1(self, row: Sequence[float]) -> float:
+        import math
+
+        z = self._b + sum(c * float(x) for c, x in zip(self._coef, row, strict=True))
+        return 1.0 / (1.0 + math.exp(-z))
+
+    def _result(
+        self, cap: ModelCapability, outputs: list[object], ids: Sequence[SampleId] | None
+    ) -> InferenceResult:
+        return InferenceResult(
+            outputs=tuple(outputs),
+            capability=cap,
+            sample_count=len(outputs),
+            batch_count=1,
+            batch_size=None,
+            inference_seconds=1e-6,
+            batch_seconds=(1e-6,),
+            model_fingerprint=self._fp,
+            adapter=self.NAME,
+            adapter_version=self.VERSION,
+            device=self.device,
+            sample_ids=None if ids is None else tuple(ids),
+        )
+
+    def predict(
+        self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        rows = inputs.tolist() if hasattr(inputs, "tolist") else inputs
+        if not isinstance(rows, list) or not rows:
+            raise InferenceError("inputs must be a non-empty list of rows")
+        return self._result(
+            ModelCapability.PREDICT, [1 if self._p1(r) >= 0.5 else 0 for r in rows], sample_ids
+        )
+
+    def predict_proba(
+        self, inputs: Inputs, *, sample_ids: Sequence[SampleId] | None = None
+    ) -> InferenceResult:
+        rows = inputs.tolist() if hasattr(inputs, "tolist") else inputs
+        if not isinstance(rows, list) or not rows:
+            raise InferenceError("inputs must be a non-empty list of rows")
+        outs: list[object] = []
+        for r in rows:
+            p = self._p1(r)
+            outs.append((1.0 - p, p))
+        return self._result(ModelCapability.PREDICT_PROBA, outs, sample_ids)
 
     def batch_predict(
         self, inputs: Inputs, batch_size: int, *, sample_ids: Sequence[SampleId] | None = None

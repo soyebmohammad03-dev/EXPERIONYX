@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Stress records (Phase 14)
+
+`StressAnalysis` (`sxa_`) is one stress experiment over a validated baseline; `StressTrial` (`sxt_`) is one
+expanded unit (point x repeat x cell), a real run. Trial evidence names its origin (Fault Laboratory or
+model-level). See [stress.md](stress.md).
+
 ## Data quality records (Phase 13)
 
 `QualityAnalysis` (`qan_`) is one analysis of a registered dataset; `QualityCheck` (`qck_`) is one check

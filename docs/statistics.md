@@ -121,3 +121,12 @@ Wilson intervals for missing-value rates and class proportions, `compare` (unpai
 for missingness and validity rate differences between groups, and `adjust_pvalues` per comparison
 family. Its own procedures are descriptive: Tukey/MAD outlier rules, population skewness and kurtosis,
 Pearson correlation and value purity as leakage *indicators*. None of them is a test or a verdict.
+
+## Reuse by stress analysis (Phase 14)
+
+The stress engine ([stress.md](stress.md)) adds no inference of its own. Per trial it compares the
+per-sample measure of the baseline and stressed runs with `compare` (PAIRED when the same samples and
+ground truth were evaluated, otherwise UNPAIRED with the reason), aggregates repeats with `summarize` and
+`bootstrap_interval`, and corrects the design's family of tests with `adjust_pvalues`. Differences are
+stressed minus baseline; deterioration is direction-aware. A p-value is not practical importance, and a
+handful of trials gives wide uncertainty. Nothing is combined into a score.

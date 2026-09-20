@@ -17,7 +17,7 @@ reliable?". Nothing in it generalizes beyond the evaluated model, dataset and co
 ## Dimensions (each has an explicit status)
 
 `BASELINE_PERFORMANCE`, `FAULT_SENSITIVITY`, `FAILURE_PREVALENCE`, `FAILURE_SEVERITY`,
-`INTERACTION_SENSITIVITY`, `SLICE_SENSITIVITY`, `DISTRIBUTION_SHIFT`, `REPRODUCIBILITY`, `UNCERTAINTY`, `LATENCY`,
+`INTERACTION_SENSITIVITY`, `SLICE_SENSITIVITY`, `DISTRIBUTION_SHIFT`, `MODEL_STRESS`, `REPRODUCIBILITY`, `UNCERTAINTY`, `LATENCY`,
 `CALIBRATION`. Status is one of `OBSERVED`, `DERIVED`, `UNAVAILABLE` (the evidence does not exist; the
 reason is stated) or `INSUFFICIENT_EVIDENCE` (it exists but is too thin to summarize). Missing
 dimensions are never fabricated, and no universal threshold is applied.
@@ -26,6 +26,7 @@ dimensions are never fabricated, and no universal threshold is applied.
 - **Fault sensitivity**: per fault experiment: fault type, version, parameters, scope, components, trial counts (completed, failed, skipped, seeds), and per sweep point the faulted and deterioration aggregates with their bootstrap intervals and the *diagnostic* effect classification. Faults are listed, never ranked.
 - **Failure prevalence / severity**: per included mode: lifecycle state, `established` (true only for `CONFIRMED`), prevalence with its denominator, the severity *vector*, classes, slices, fault types, supporting experiments and whether a passing reproduction check exists. A mode that is not `CONFIRMED` is flagged as a grouping of signals, not an established finding.
 - **Interaction sensitivity**: per analysis: component faults, metric, contrast, normalized contrast, interval, order effect, label, lifecycle state, trial counts, reproduction. Never a causal claim.
+- **Model stress** (Phase 14): copies the recorded results of referenced stress analyses (`stress_analyses`); `UNAVAILABLE` if none (the absence of stress evidence is not evidence of robustness), `INSUFFICIENT_EVIDENCE` if no trial had enough evidence. No score. See [stress.md](stress.md).
 - **Distribution shift** (Phase 12): copies the recorded results of referenced drift analyses (`drift_analyses`); `UNAVAILABLE` if none, `INSUFFICIENT_EVIDENCE` if no result had enough samples. Observed differences between windows; not linked to any other dimension. See [drift.md](drift.md).
 - **Slice sensitivity**: reuses the stored slice results and per-class recall of the baseline, plus class/slice-level interaction effects; what is absent is reported `UNAVAILABLE`, never assumed uniform. No slice engine was added.
 - **Reproducibility**: trial and seed counts, mode reproduction checks, interaction lifecycle, environments seen, and an explicit list of *unresolved issues*. Replay is reported as `NOT_RUN` at construction (use `reliability replay`). There is no reliability percentage.

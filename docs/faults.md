@@ -184,3 +184,9 @@ kinds. Image faults assume `[value_min, value_max]` pixel ranges you supply. `mi
 on models that reject NaN produces recorded FAILED trials, not a robustness score. No
 distribution-shift, temporal or resource faults yet. Seeds do not provide population-level
 inference. Determinism is per numpy behaviour, not cross-platform bitwise.
+
+## Relation to model stress (Phase 14)
+
+Input stress in the [stress laboratory](stress.md) IS this laboratory: a stress spec maps to a fault spec,
+its trials are fault trials, and its evidence names the fault. The stress laboratory adds model-level
+stress (parameters, decision threshold, evaluation conditions) and a validated-baseline analysis on top.

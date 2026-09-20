@@ -10,7 +10,7 @@ from abc import ABC
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Protocol, Self
+from typing import Any, ClassVar, Protocol, Self, runtime_checkable
 
 from experionyx.adapters.capabilities import (
     DatasetCapability,
@@ -135,6 +135,19 @@ class DatasetAdapter(Protocol):
     def sample(self, index: int, split: str | None = None) -> Sample: ...
 
     def batches(self, batch_size: int, split: str | None = None) -> Iterator[Batch]: ...
+
+
+@runtime_checkable
+class ParameterAccess(Protocol):
+    """OPTIONAL model-adapter capability used by the Model Stress Laboratory. An adapter that
+    implements it promises: `parameter_arrays` returns COPIES of a documented, safe subset of its
+    numeric parameters keyed by name (never live views), and `with_parameters` returns a NEW adapter
+    built from a private copy of the model with those arrays substituted. The original adapter and
+    its model are never touched, so restoration is by construction and can be verified by digest."""
+
+    def parameter_arrays(self) -> Mapping[str, Any]: ...
+
+    def with_parameters(self, arrays: Mapping[str, Any]) -> "ModelAdapter": ...
 
 
 class BaseModelAdapter(ABC):  # abstract only by convention: shared behaviour

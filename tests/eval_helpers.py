@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from experionyx.adapters.capabilities import DeviceKind
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
@@ -18,7 +19,12 @@ from experionyx.evaluation.results import EvaluationResult
 from experionyx.evaluation.serial import from_jsonable
 from experionyx.execution import ExecutionResult, Executor, resolve_procedure
 from experionyx.sqlite import SqliteRegistry
-from pure_adapters import ConstantModelAdapter, ListDatasetAdapter, ThresholdClassifierAdapter
+from pure_adapters import (
+    ConstantModelAdapter,
+    LinearProbaAdapter,
+    ListDatasetAdapter,
+    ThresholdClassifierAdapter,
+)
 
 NOW = datetime(2026, 9, 19, 12, tzinfo=UTC)
 
@@ -28,6 +34,7 @@ def pure_registries() -> AdapterRegistries:
     datasets: AdapterRegistry = AdapterRegistry("dataset")  # type: ignore[type-arg]
     models.register("constant", ConstantModelAdapter)
     models.register("threshold", ThresholdClassifierAdapter)
+    models.register("linear", LinearProbaAdapter)
     datasets.register("list", ListDatasetAdapter)
     return AdapterRegistries(models, datasets)
 
@@ -53,13 +60,14 @@ def eval_world(
     data: Mapping[str, object],
     config: EvaluationConfig,
     classifier: bool = True,
+    model_cls: Any = None,
     parameters: Mapping[str, object] | None = None,
 ) -> EvalWorld:
     ws = tmp_path / "ws"
     (ws / "m").mkdir(parents=True)
     (ws / "m" / "model.json").write_text(json.dumps(model), encoding="utf-8")
     (ws / "m" / "data.json").write_text(json.dumps(data), encoding="utf-8")
-    model_cls = ThresholdClassifierAdapter if classifier else ConstantModelAdapter
+    model_cls = model_cls or (ThresholdClassifierAdapter if classifier else ConstantModelAdapter)
     m = model_cls.load(ws / "m" / "model.json", version="1", device=DeviceKind.CPU, options={})
     d = ListDatasetAdapter.load(ws / "m" / "data.json", version="1", options={})
     rec_m = RegisteredModel("model", m.metadata(), NOW, "m/model.json")

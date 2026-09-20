@@ -18,6 +18,7 @@ from experionyx.hashing import HASH_PREFIX, content_hash
 from experionyx.interactions.config import InteractionConfig
 from experionyx.slices.analysis import SliceConfig
 from experionyx.slices.spec import SliceSpec
+from experionyx.stress.spec import StressPlan
 
 DRIFT_PLACEHOLDER_RUN = (
     "run_" + "0" * 32
@@ -227,6 +228,9 @@ class BenchmarkSpec:
         SliceSpec, ...
     ] = ()  # explicit request for a Phase 11 slice analysis (empty: none)
     slice_config: SliceConfig = field(default_factory=SliceConfig)
+    stress: StressPlan | None = (
+        None  # explicit request for a Phase 14 stress analysis on the benchmark's model, dataset, evaluation and baseline
+    )
     drift: ShiftSpec | None = (
         None  # explicit request for a Phase 12 drift analysis; its baseline_run is a placeholder here and is replaced by the benchmark's baseline
     )
@@ -291,6 +295,10 @@ class BenchmarkSpec:
             d["slices"] = [x.to_dict() for x in self.slices]
             d["slice_config"] = self.slice_config.to_dict()
         if (
+            self.stress is not None
+        ):  # explicit request only; keeps every earlier benchmark's identity
+            d["stress"] = self.stress.to_dict()
+        if (
             self.drift is not None
         ):  # explicit request only; keeps every earlier benchmark's identity
             d["drift"] = {k: x for k, x in self.drift.to_dict().items() if k != "baseline_run"}
@@ -327,6 +335,7 @@ class BenchmarkSpec:
             "slices",
             "slice_config",
             "drift",
+            "stress",
         }
         extra = set(d) - known
         missing = {"name", "version", "model", "dataset", "faults", "seeds"} - set(d)
@@ -352,5 +361,6 @@ class BenchmarkSpec:
             BenchmarkLimits.from_dict(d.get("limits", {})), int(d.get("schema_version", SPEC_SCHEMA_VERSION)),
             tuple(SliceSpec.from_dict(x) for x in d.get("slices", [])),
             SliceConfig.from_dict(d["slice_config"]) if d.get("slice_config") else SliceConfig(),
+            StressPlan.from_dict(d["stress"]) if d.get("stress") else None,
             ShiftSpec.from_dict({**d["drift"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("drift") else None,
         )  # fmt: skip

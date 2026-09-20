@@ -27,6 +27,7 @@ from experionyx.registry import Registry
 from experionyx.reliability.spec import PROFILE_VERSION, ProfileSpec
 from experionyx.reliability.taxonomy import Dimension, DimensionStatus, RefKind, Scope
 from experionyx.slices.entities import SliceAnalysis
+from experionyx.stress.entities import StressAnalysis
 
 FAULT_PATH = "fault/fault.json"
 NEVER_CLAIMED = [
@@ -267,6 +268,27 @@ def check_compatibility(
         ):
             if want != got:
                 issues.append(_issue("INCOMPATIBLE_SLICE_ANALYSIS", f"{label} {want}", f"{got}", f"the slice analysis was made over a different {label}", sid))  # fmt: skip
+    for xid in spec.stress_analyses:
+        try:
+            sx = registry.get(StressAnalysis, xid)
+        except ExperionyxError:
+            issues.append(
+                _issue(
+                    "STRESS_ANALYSIS_MISSING",
+                    "a registered stress analysis",
+                    xid,
+                    "it cannot be summarized",
+                    xid,
+                )
+            )
+            continue
+        for label, want, got in (
+            ("baseline run", spec.baseline_run, sx.baseline_run_id),
+            ("evaluated model", ctx.model_fingerprint, str(_stress_model_fp(registry, sx))),
+            ("dataset fingerprint", ctx.dataset_fingerprint, str(_stress_dataset_fp(registry, sx))),
+        ):
+            if want != got:
+                issues.append(_issue("INCOMPATIBLE_STRESS_ANALYSIS", f"{label} {want}", f"{got}", f"the stress analysis was made over a different {label}", xid))  # fmt: skip
     for did in spec.drift_analyses:
         try:
             da = registry.get(DriftAnalysis, did)
@@ -828,6 +850,45 @@ def _slices(registry: Registry, spec: ProfileSpec, ctx: Context, acc: _Acc) -> N
     acc.ref(Dimension.SLICE_SENSITIVITY, RefKind.RUN, spec.baseline_run, "baseline slices/classes")
 
 
+def _stress_model_fp(registry: Registry, sx: StressAnalysis) -> object:
+    from experionyx.adapters.records import RegisteredModel
+
+    return registry.get(RegisteredModel, sx.model_id).fingerprint
+
+
+def _stress_dataset_fp(registry: Registry, sx: StressAnalysis) -> object:
+    from experionyx.adapters.records import RegisteredDataset
+
+    return registry.get(RegisteredDataset, sx.dataset_id).fingerprint
+
+
+def _stress(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
+    """Model-stress evidence as one dimension. Statuses and counts are copied as recorded; a lack of
+    stress evidence stays UNAVAILABLE or INSUFFICIENT_EVIDENCE and is never read as robustness."""
+    if not spec.stress_analyses:
+        acc.dim(
+            Dimension.MODEL_STRESS,
+            DimensionStatus.UNAVAILABLE,
+            [],
+            reason="no stress analysis was referenced by the profile; the absence of stress evidence is not evidence of robustness",
+        )
+        return
+    rows: list[dict[str, Any]] = []
+    for xid in spec.stress_analyses:
+        sx = registry.get(StressAnalysis, xid)
+        s = sx.summary
+        rows.append({"source": {"kind": "STRESS_ANALYSIS", "id": xid, "spec_id": sx.spec_id, "provenance_fingerprint": sx.provenance_fingerprint}, "analysis_status": sx.analysis_status, "design": to_jsonable(s.get("design")), "families": to_jsonable(s.get("families")), "origins": to_jsonable(s.get("origins")), "measure": to_jsonable(s.get("measure")), "coverage": to_jsonable(s.get("coverage")), "trial_status_counts": to_jsonable(s.get("trial_status_counts")), "primary_status_counts": to_jsonable(s.get("primary_status_counts")), "points": to_jsonable(s.get("points")), "note": "observed changes under deliberately applied stress, copied as recorded; no robustness score and no causal claim"})  # fmt: skip
+        acc.ref(Dimension.MODEL_STRESS, RefKind.STRESS_ANALYSIS, xid, sx.analysis_status)
+    derived = any((r["primary_status_counts"] or {}).get("DERIVED") for r in rows)
+    acc.dim(
+        Dimension.MODEL_STRESS,
+        DimensionStatus.DERIVED if derived else DimensionStatus.INSUFFICIENT_EVIDENCE,
+        rows,
+        reason=None if derived else "no stress trial had enough completed evidence",
+        note="stress evidence is scoped to the stated stress, model, data and evaluation; untested stresses remain untested",
+    )
+
+
 def _drift(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
     """Distribution-shift evidence as one dimension. Statuses and counts are copied as recorded;
     nothing links a distribution change to any other dimension, and no score is formed."""
@@ -1007,6 +1068,16 @@ def provenance_fingerprint(
             "modes": {m: registry.get(FailureMode, m).content_hash() for m in spec.failure_modes},
             **(
                 {
+                    "stress_analyses": {
+                        x: registry.get(StressAnalysis, x).provenance_fingerprint
+                        for x in spec.stress_analyses
+                    }
+                }
+                if spec.stress_analyses
+                else {}
+            ),
+            **(
+                {
                     "drift_analyses": {
                         d: registry.get(DriftAnalysis, d).provenance_fingerprint
                         for d in spec.drift_analyses
@@ -1039,6 +1110,7 @@ def build(registry: Registry, store: ArtifactStore, spec: ProfileSpec) -> Built:
     inters = _interactions(registry, spec, acc)
     _slices(registry, spec, ctx, acc)
     _drift(registry, spec, acc)
+    _stress(registry, spec, acc)
     runs = [spec.baseline_run]
     for fid in spec.fault_experiments:
         runs += [

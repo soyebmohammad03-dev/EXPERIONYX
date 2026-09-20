@@ -27,6 +27,7 @@ from experionyx.registry import Registry
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.taxonomy import DimensionStatus
 from experionyx.slices.entities import SliceAnalysis
+from experionyx.stress.entities import StressAnalysis
 
 NO_SCORE = "no overall score, ranking or verdict is computed; coverage counts what was executed and is not a measure of robustness"
 NEVER_CLAIMED = [
@@ -58,6 +59,7 @@ class Executed:
     profile_id: str | None
     slice_analysis: str | None = None
     drift_analysis: str | None = None
+    stress_analysis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +73,7 @@ class Executed:
             "profile_id": self.profile_id,
             **({"slice_analysis": self.slice_analysis} if self.slice_analysis else {}),
             **({"drift_analysis": self.drift_analysis} if self.drift_analysis else {}),
+            **({"stress_analysis": self.stress_analysis} if self.stress_analysis else {}),
         }
 
     @classmethod
@@ -86,6 +89,7 @@ class Executed:
             d.get("profile_id"),
             d.get("slice_analysis"),
             d.get("drift_analysis"),
+            d.get("stress_analysis"),
         )
 
 
@@ -508,6 +512,29 @@ def collect(
         else:
             reasons.append("the requested drift analysis did not run")
 
+    # -- stress analysis (only when the benchmark explicitly requested one) -------------------------------------------------------------------
+    stress_block: dict[str, Any] = {"status": DimensionStatus.UNAVAILABLE.value, "reason": "no stress analysis was requested by this benchmark"}  # fmt: skip
+    stress_fp: str | None = None
+    if spec.stress is not None:
+        stress_block = {"status": DimensionStatus.UNAVAILABLE.value, "planned": len(spec.stress.units()), "reason": ex.errors.get("stress", "the stress analysis did not run")}  # fmt: skip
+        if ex.stress_analysis:
+            xa = registry.get(StressAnalysis, ex.stress_analysis)
+            stress_fp = xa.provenance_fingerprint
+            cov: dict[str, Any] = dict(xa.summary.get("coverage") or {})  # type: ignore[call-overload]
+            insufficient = bool(
+                cov.get("failed")
+                or cov.get("skipped")
+                or cov.get("unsupported")
+                or cov.get("insufficient_evidence")
+            )
+            stress_block = {"status": DimensionStatus.DERIVED.value, "analysis_id": xa.id, "analysis_status": xa.analysis_status, "planned": len(spec.stress.units()), "coverage": cov, "trial_status_counts": to_jsonable(xa.summary.get("trial_status_counts")), "primary_status_counts": to_jsonable(xa.summary.get("primary_status_counts")), "source": {"kind": "STRESS_ANALYSIS", "id": xa.id}, "note": "the stress analysis is referenced, not duplicated: planned, executed, unsupported, failed and insufficient-evidence units are counted in its coverage"}  # fmt: skip
+            if xa.analysis_status != "COMPLETE" or insufficient:
+                reasons.append(
+                    "the stress analysis has failed, skipped, unsupported or insufficient-evidence trials"
+                )
+        else:
+            reasons.append("the requested stress analysis did not run")
+
     # -- coverage ---------------------------------------------------------------------------------------------------------------------------------
     trials = {s.value: sum(u["status"] == s.value for u in fault_units) for s in UnitStatus}
     pts_total = sum(f.get("points_requested", 0) for f in fam.values())
@@ -583,6 +610,7 @@ def collect(
         "failure_modes": fm_status, "reliability_profile": profile["status"],
         **({"slice_analysis": slice_block["status"]} if spec.slices else {}),
         **({"drift_analysis": drift_block["status"]} if spec.drift is not None else {}),
+        **({"stress_analysis": stress_block["status"]} if spec.stress is not None else {}),
         "uncertainty": DimensionStatus.DERIVED.value if intervals else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "reproducibility": DimensionStatus.DERIVED.value if responses else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
     }  # fmt: skip
@@ -593,6 +621,7 @@ def collect(
         "reliability_profile": profile,
         **({"slice_analysis": slice_block} if spec.slices else {}),
         **({"drift_analysis": drift_block} if spec.drift is not None else {}),
+        **({"stress_analysis": stress_block} if spec.stress is not None else {}),
         "uncertainty": {"status": section["uncertainty"], "intervals_available": intervals, "caveats": ["intervals are descriptive spreads under each analysis's own method and are not comparable across methods", *sorted({w for r in inter for w in ((r.get("bootstrap") or {}).get("warnings") or [])})]},
         "reproducibility": {"status": section["reproducibility"], "trials_per_family": {k: {"requested": f.get("trials_requested"), "completed": f.get("completed")} for k, f in fam.items() if "trials_requested" in f}, "distinct_seeds": len(spec.seeds), "interactions_by_lifecycle_state": _count(r.get("lifecycle_state") for r in inter if r.get("lifecycle_state")), "unresolved": list(reasons), "replay": "the collect Run can be replayed (`benchmark replay`); re-executing the whole protocol in another registry is the reproduction test"},
     }  # fmt: skip
@@ -613,6 +642,7 @@ def collect(
             "profile": prof_fp,
             **({"slice_analysis": slice_fp} if spec.slices else {}),
             **({"drift_analysis": drift_fp} if spec.drift is not None else {}),
+            **({"stress_analysis": stress_fp} if spec.stress is not None else {}),
         }
     )
     summary = {

@@ -56,6 +56,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     leakage indicators are not proof, missingness can be informative and class imbalance is
     context-dependent ([data-quality.md](data-quality.md)).
 
+17. **A stress is an experiment, not a score.** A stress trial deliberately changes one recorded thing,
+    is compared with a validated baseline, keeps raw values, direction-aware deterioration and paired
+    statistics, and never yields a robustness score or a causal claim; a lack of stress evidence is
+    never "safe" ([stress.md](stress.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

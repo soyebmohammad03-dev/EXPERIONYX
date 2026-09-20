@@ -51,6 +51,8 @@ from experionyx.reliability.engine import run_profile
 from experionyx.reliability.spec import ProfileSpec
 from experionyx.reliability.taxonomy import Scope
 from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
+from experionyx.stress.engine import run_stress_experiment
+from experionyx.stress.spec import StressDesign
 
 PROCEDURE = "experionyx.benchmark.engine:run_benchmark_collect"
 ARTIFACTS = ("spec", "units", "coverage", "results", "summary")
@@ -254,6 +256,15 @@ def run_benchmark(
                 errors["drift"] = f"the drift analysis run ended {do.status.value}"
         except (ExperionyxError, ValueError) as exc:
             errors["drift"] = f"{type(exc).__name__}: {exc}"
+    stress_analysis_id: str | None = None
+    if spec.stress is not None:
+        try:
+            sr = run_stress_experiment(registry, store, executor, StressDesign(spec.model, spec.dataset, spec.stress, spec.evaluation, baseline_run=baseline, resamples=spec.aggregation_resamples, seed=spec.aggregation_seed), source_root=source_root, investigation_id=inv)  # fmt: skip
+            stress_analysis_id = sr.analysis_id
+            if stress_analysis_id is None:
+                errors["stress"] = f"the stress analysis run ended {sr.status.value}"
+        except (ExperionyxError, ValueError) as exc:
+            errors["stress"] = f"{type(exc).__name__}: {exc}"
     profile_id: str | None = None
     if spec.profile:
         try:
@@ -270,6 +281,7 @@ def run_benchmark(
                     tuple(mode_ids),
                     (slice_analysis_id,) if slice_analysis_id else (),
                     (drift_analysis_id,) if drift_analysis_id else (),
+                    (stress_analysis_id,) if stress_analysis_id else (),
                 ),
             )
             profile_id = pr.profile_id
@@ -288,6 +300,7 @@ def run_benchmark(
         profile_id,
         slice_analysis_id,
         drift_analysis_id,
+        stress_analysis_id,
     )
     conf = ConfigurationRef(
         {

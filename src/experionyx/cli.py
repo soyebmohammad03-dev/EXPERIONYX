@@ -108,6 +108,11 @@ from experionyx.slices.spec import SliceSpec
 from experionyx.sqlite import DB_SCHEMA_VERSION, SqliteRegistry
 from experionyx.stats import store as stats_store
 from experionyx.stats.entities import StatisticalAnalysis
+from experionyx.stress import engine as stress_engine
+from experionyx.stress.entities import StressAnalysis, StressTrial
+from experionyx.stress.registry import StressRegistry
+from experionyx.stress.spec import FAMILIES as STRESS_FAMILIES
+from experionyx.stress.spec import StressDesign
 
 DEFAULT_WORKSPACE = ".experionyx"
 REGISTRY_FILE = "registry.sqlite"
@@ -2224,6 +2229,146 @@ def _cmd_quality_replay(args: argparse.Namespace) -> int:
     return 0 if out["deterministic"] else 1
 
 
+# -- model stress --------------------------------------------------------------------------------------------
+
+
+def _stress_design(path: str) -> StressDesign:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read stress spec {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExperionyxError("a stress spec file must be a JSON object")
+    return StressDesign.from_dict(doc)
+
+
+def _sxreg(args: argparse.Namespace, reg: SqliteRegistry) -> StressRegistry:
+    return StressRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _stress_row(a: StressAnalysis) -> dict[str, object]:
+    return {"id": a.id, "status": a.analysis_status, "spec_id": a.spec_id, "model_id": a.model_id, "dataset_id": a.dataset_id, "baseline_run_id": a.baseline_run_id, "provenance_fingerprint": a.provenance_fingerprint, "design": a.summary.get("design"), "families": to_jsonable(a.summary.get("families")), "coverage": to_jsonable(a.summary.get("coverage"))}  # fmt: skip
+
+
+def _trial_row(t: StressTrial) -> dict[str, object]:
+    return {"id": t.id, "unit_key": t.unit_key, "point_index": t.point_index, "repeat_index": t.repeat_index, "cell": t.cell, "family": t.family, "stress_ids": list(t.stress_ids), "origin": t.origin, "seed": t.seed, "status": t.status, "run_id": t.run_id, "reason": t.reason}  # fmt: skip
+
+
+def _cmd_stress_families(args: argparse.Namespace) -> int:
+    rows = {n: {"origin": f.origin.value, "target": f.target, "description": f.description, "fault_type": f.fault_type, "default_sweep_parameter": f.default_sweep, "parameters": {k: {"kind": p.kind, "required": p.required} for k, p in f.params.items()}} for n, f in sorted(STRESS_FAMILIES.items())}  # fmt: skip
+    _emit(
+        {"families": rows},
+        "\n".join(f"{n}: {r['origin']} - {r['description']}" for n, r in rows.items()),
+        args,
+    )
+    return 0
+
+
+def _cmd_stress_validate(args: argparse.Namespace) -> int:
+    d = _stress_design(args.spec)
+    units = d.plan.units()
+    out: dict[str, object] = {"valid": True, "spec_id": d.spec_id, "plan_id": d.plan.plan_id, "design": d.plan.design, "origin": d.plan.origin.value, "stress_ids": [c.stress_id for c in d.plan.components], "n_trials": len(units), "units": [{"key": u.key, "point_index": u.point_index, "repeat_index": u.repeat_index, "cell": u.cell, "seed": u.seed, "value": u.value} for u in units]}  # fmt: skip
+    if args.preflight:
+        with _open(args.workspace) as reg:
+            out["capabilities"] = stress_engine.preflight(reg, d, _executor(reg, args.workspace))
+    _emit(out, f"VALID: {d.spec_id}: {d.plan.design}, {len(units)} trial(s)", args)
+    return 0
+
+
+def _cmd_stress_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        cols = {k: v for k, v in (("model_id", args.model_id), ("dataset_id", args.dataset_id), ("analysis_status", args.status)) if v}  # fmt: skip
+        rows = [_stress_row(a) for a in _sxreg(args, reg).analyses(**cols)]
+    _emit(
+        {"analyses": rows},
+        "\n".join(f"{r['id']} {r['status']} {r['design']} {r['spec_id']}" for r in rows),
+        args,
+    )
+    return 0
+
+
+def _cmd_stress_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sr = _sxreg(args, reg)
+        if args.id.startswith("sxt_"):
+            t = reg.get(StressTrial, args.id)
+            doc: dict[str, object] = {
+                **_trial_row(t),
+                "analysis_id": t.analysis_id,
+                "lineage": to_jsonable(t.lineage),
+            }
+        else:
+            a = sr.analysis(args.id)
+            doc = {**_stress_row(a), "summary": to_jsonable(a.summary), "provenance": sr.provenance(a.id), "trials": [_trial_row(t) for t in sr.trials(a.id)], "artifacts": [{"path": x.path, "id": x.id} for x in sr.artifacts(a.id)]}  # fmt: skip
+            if args.full:
+                doc["documents"] = {n: sr.document(a.id, n) for n in ("spec", "plan", "trials", "baseline", "results", "analyses", "summary")}  # fmt: skip
+    _emit(doc, f"{args.id}: {doc.get('status')}", args)
+    return 0
+
+
+def _stress_run(args: argparse.Namespace, *, sweep_only: bool) -> int:
+    d = _stress_design(args.spec)
+    if sweep_only and d.plan.design not in ("SWEEP", "REPEATED"):
+        raise ExperionyxError(f"`stress sweep` needs a plan with a sweep or several seeds (this one is {d.plan.design}); use `stress run`")  # fmt: skip
+    with _open(args.workspace) as reg:
+        out = stress_engine.run_stress_experiment(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), d, source_root=Path.cwd(), investigation_id=args.investigation)  # fmt: skip
+        a = reg.get(StressAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "baseline_run_id": out.baseline_run_id, "capabilities": to_jsonable(list(out.capabilities)), "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
+
+
+def _cmd_stress_run(args: argparse.Namespace) -> int:
+    return _stress_run(args, sweep_only=False)
+
+
+def _cmd_stress_sweep(args: argparse.Namespace) -> int:
+    return _stress_run(args, sweep_only=True)
+
+
+def _cmd_stress_compare(args: argparse.Namespace) -> int:
+    """Recompute the analysis from the stored trials and compare it with the stored documents; nothing is stored."""
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        sr = StressRegistry(reg, store)
+        a = sr.analysis(args.id)
+        spec, trials, analyses = (
+            sr.document(a.id, "spec"),
+            sr.document(a.id, "trials"),
+            sr.document(a.id, "analyses"),
+        )
+        design = StressDesign.from_dict(spec["design"])
+        dataset = None
+        try:
+            from experionyx.slices.data import dataset_for_run
+
+            dataset = dataset_for_run(
+                reg, default_registries(entry_points=True), Path(args.workspace), a.baseline_run_id
+            )
+        except ExperionyxError:
+            dataset = None
+        c = stress_engine.compute(reg, store, design, a.baseline_run_id, [{k: t[k] for k in ("unit", "status", "run_id", "experiment_id", "reason", "origin")} for t in trials["trials"]], analyses["links"], spec["capabilities"], dataset, a.investigation_id)  # fmt: skip
+        stored = {
+            n: sr.document(a.id, n)
+            for n in ("spec", "plan", "trials", "baseline", "results", "analyses", "summary")
+        }
+    from experionyx.interactions.lifecycle import _compare as compare_docs
+
+    diffs: list[str] = []
+    for name, doc in {**c.docs, "summary": c.summary}.items():
+        compare_docs(name, stored[name], json.loads(json.dumps(to_jsonable(doc))), diffs)
+    out = {"analysis_id": a.id, "reproduced": not diffs, "differences": diffs[:50], "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint}, "not_stored": "nothing was stored; `stress replay` re-executes the trials"}  # fmt: skip
+    _emit(out, f"{'reproduced' if not diffs else 'DIFFERS'}: {a.id}", args)
+    return 0 if not diffs else 1
+
+
+def _cmd_stress_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = stress_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id, trials=not args.no_trials)  # fmt: skip
+    _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
+    return 0 if out["deterministic"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -2911,6 +3056,77 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_quality_replay)
+
+    sx = group(
+        "stress",
+        "controlled model stress (input, parameter, decision-rule, evaluation-condition); observed changes, no robustness score, no causal claim",
+    )
+    p = sx.add_parser(
+        "families",
+        help="the stress families, their origin (Fault Laboratory or model-level) and parameters",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_families)
+    p = sx.add_parser(
+        "validate",
+        help="parse a stress design; prints its identity and every expanded trial (--preflight checks the model, dataset and baseline)",
+    )
+    p.add_argument("spec")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="also load the registered model and refuse what it cannot support",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_validate)
+    p = sx.add_parser("list", help="list stress analyses")
+    p.add_argument("--model-id")
+    p.add_argument("--dataset-id")
+    p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_list)
+    p = sx.add_parser(
+        "inspect",
+        help="a stress analysis (sxa_) with provenance, trials and artifacts, or one trial (sxt_)",
+    )
+    p.add_argument("id")
+    p.add_argument("--full", action="store_true", help="include every stored document")
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_inspect)
+    for name, fn, text in (
+        (
+            "run",
+            _cmd_stress_run,
+            "run a stress design (single point, compound, factorial, repeated execution); exit 3 if evidence is incomplete",
+        ),
+        (
+            "sweep",
+            _cmd_stress_sweep,
+            "run a stress design that sweeps a parameter or repeats over seeds",
+        ),
+    ):
+        p = sx.add_parser(name, help=text)
+        p.add_argument("spec")
+        p.add_argument(
+            "--investigation", help="investigation ID (default: a model-stress investigation)"
+        )
+        slfmt(p)
+        p.set_defaults(func=fn)
+    p = sx.add_parser(
+        "compare",
+        help="recompute an analysis from its stored trials and compare it with the stored documents; nothing is stored",
+    )
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_compare)
+    p = sx.add_parser(
+        "replay",
+        help="replay the analysis and every trial as NEW runs and compare; exit 1 on any difference",
+    )
+    p.add_argument("id")
+    p.add_argument("--no-trials", action="store_true", help="replay only the analysis run")
+    slfmt(p)
+    p.set_defaults(func=_cmd_stress_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

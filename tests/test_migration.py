@@ -265,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +303,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -344,7 +344,7 @@ def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
         assert new
         assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "statistical_analyses" in tables
         assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
@@ -385,7 +385,7 @@ def test_every_prior_version_migrates_to_slice_tables_and_accepts_slices(
         assert created2
         assert again.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"slices", "slice_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM slices").fetchone()[0] == 2
@@ -435,7 +435,7 @@ def test_every_prior_version_migrates_to_drift_tables_and_accepts_windows(
         )
         assert created3 and other.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"temporal_windows", "drift_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM temporal_windows").fetchone()[0] == 2
@@ -493,7 +493,7 @@ def test_every_prior_version_migrates_to_quality_tables_and_accepts_records(
         assert QualityRegistry(reg).analyses() == []  # the new table exists and is empty
         assert reg.find(QualityCheck) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 12
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"quality_analyses", "quality_checks"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM quality_analyses").fetchone()[0] == 0
@@ -513,3 +513,40 @@ def test_quality_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 11  # still the old version
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "quality_analyses" not in tables  # nothing half-applied
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+def test_every_prior_version_migrates_to_stress_tables_and_keeps_its_data(
+    tmp_path: Path, version: int
+) -> None:
+    from experionyx.stress.entities import StressAnalysis, StressTrial
+    from experionyx.stress.registry import StressRegistry
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        assert StressRegistry(reg).analyses() == []  # the new tables exist and are empty
+        assert reg.find(StressTrial) == []
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 13
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"stress_analyses", "stress_trials"} <= tables
+        assert raw.execute("SELECT COUNT(*) FROM stress_analyses").fetchone()[0] == 0
+        assert raw.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] >= 1
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+    assert StressAnalysis.PREFIX == "sxa"
+    assert StressTrial.PREFIX == "sxt"
+
+
+def test_stress_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v12.sqlite"
+    make_database(path, 12)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE stress_trials (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 12  # still the old version
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "stress_analyses" not in tables  # nothing half-applied

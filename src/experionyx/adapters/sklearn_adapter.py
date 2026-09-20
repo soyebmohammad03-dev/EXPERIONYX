@@ -4,6 +4,7 @@ SECURITY: sklearn models are persisted with joblib, which is pickle-based. Loadi
 model file can execute arbitrary code. Only load artifacts you produced or trust.
 """
 
+import copy
 import hashlib
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -195,6 +196,44 @@ class SklearnModelAdapter(BaseModelAdapter):
             serialization_format="joblib",
             size_bytes=self._size_bytes,
             capabilities=tuple(self._caps),
+        )
+
+    # -- optional ParameterAccess (Model Stress Laboratory) -------------------------------------
+
+    SAFE_PARAMETERS: ClassVar[tuple[str, ...]] = ("coef_", "intercept_")
+
+    def parameter_arrays(self) -> dict[str, np.ndarray]:
+        """Copies of the fitted linear parameters (`coef_`, `intercept_`) when the estimator has
+        them as floating-point arrays; other estimators expose none (no unsafe attribute access)."""
+        out: dict[str, np.ndarray] = {}
+        for name in self.SAFE_PARAMETERS:
+            value = getattr(self._estimator, name, None)
+            if isinstance(value, np.ndarray) and value.dtype.kind == "f":
+                out[name] = value.copy()
+        return out
+
+    def with_parameters(self, arrays: Mapping[str, object]) -> "SklearnModelAdapter":
+        current = self.parameter_arrays()
+        for name, value in arrays.items():
+            if name not in current:
+                raise InvalidModelError(
+                    f"{name!r} is not a safely accessible parameter of this model"
+                )
+            arr = np.asarray(value)
+            if arr.shape != current[name].shape or arr.dtype.kind != "f":
+                raise InvalidModelError(
+                    f"replacement for {name!r} must be a float array of shape {current[name].shape}"
+                )
+        clone = copy.deepcopy(self._estimator)
+        for name, value in arrays.items():
+            setattr(clone, name, np.asarray(value, dtype=current[name].dtype).copy())
+        return type(self)(
+            clone,
+            version=self._version,
+            fingerprint=self._fingerprint,
+            size_bytes=self._size_bytes,
+            load_seconds=self.load_seconds,
+            device=self.device,
         )
 
     # -- inference ----------------------------------------------------------------------------

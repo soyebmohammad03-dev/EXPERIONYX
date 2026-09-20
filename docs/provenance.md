@@ -58,3 +58,11 @@ supply are recorded as given.
 Provenance describes what was *recorded*; it does not prove the recorded source is what ran (a
 dirty tree is flagged, its diff is not stored), nor capture system libraries, hardware
 accelerators, or data contents.
+
+## Stress trials (Phase 14)
+
+Every stress trial is a Run with its own Provenance record (source revision, environment, dependency
+digest) and records the model and dataset fingerprints, the split, the exact stress specification and
+seed, the baseline run, the transformation's identity (a Fault Laboratory fault ID, or the parameter
+digests before, after and of the stressed model, and the predictions digest), the evaluation configuration
+and its artifact digests. See [stress.md](stress.md).

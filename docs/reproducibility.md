@@ -47,3 +47,12 @@ and software versions ([data-quality.md](data-quality.md)). `experionyx data-qua
 as a new run and compares all five stored documents; a document that no longer matches its digest is
 refused, not reported as a difference. Permutation tests and bootstraps are seeded and do not depend on
 row or column order.
+
+## Stress analyses (Phase 14)
+
+A stress analysis is a Run, and so is every trial. Its provenance fingerprint covers the whole design,
+the baseline, each trial's outcome and artifact digests, slice membership and software versions
+([stress.md](stress.md)). `experionyx stress replay` re-executes the analysis and every completed trial as
+new runs and compares all seven documents, each trial's identity and its metric values within tolerance;
+`stress compare` recomputes the analysis from the stored trials without storing anything. Seeded stress
+uses only its recorded seed; deterministic stress takes none.
