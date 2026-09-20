@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Drift records (Phase 12)
+
+`DriftWindow` (`twn_`) is a registered temporal window definition (identity: ordering field, role,
+bounds, inclusivity); `DriftAnalysis` (`dan_`) is one analysis over a baseline run (windows, per-feature,
+distribution and performance results live in digest-verified artifacts). See [drift.md](drift.md).
+
 ## Slice records (Phase 11)
 
 `Slice` (`sls_`) is a logical slice definition whose identity is its normalized condition; `SliceAnalysis`

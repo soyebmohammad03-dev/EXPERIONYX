@@ -322,6 +322,14 @@ class Executor:
         self._source_root, self._clock = source_root, clock
         self._adapters, self._inputs_root, self._device = adapters, inputs_root, device
 
+    @property
+    def adapters(self) -> AdapterRegistries | None:
+        return self._adapters
+
+    @property
+    def inputs_root(self) -> Path | None:
+        return self._inputs_root
+
     # -- public API ---------------------------------------------------------------------------
 
     def execute(

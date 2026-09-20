@@ -29,3 +29,12 @@ digests, and a provenance fingerprint ([provenance.md](provenance.md)). It can r
 hardware/accelerator capture, data and model-weight digests, deterministic-execution guarantees,
 and storage of uncommitted source diffs. Repeatability, reproducibility and replicability are
 therefore **not** yet established by this repository.
+
+## Drift analyses (Phase 12)
+
+A drift analysis is a Run. Its provenance fingerprint covers the dataset, model, baseline, declared
+ordering, every window's identity and membership digest, skipped windows, features and their declared
+types, methods, seed, correction and thresholds, slice identities and software versions
+([drift.md](drift.md)). `experionyx drift replay` re-executes it as a new run and compares all six
+stored documents; a document that no longer matches its digest is refused, not reported as a
+difference. The permutation tests and bootstraps are seeded, and results do not depend on input order.

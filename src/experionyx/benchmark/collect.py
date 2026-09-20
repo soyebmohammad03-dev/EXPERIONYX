@@ -13,6 +13,7 @@ from experionyx.benchmark.protocol import Protocol, Unit
 from experionyx.benchmark.spec import ENGINE_VERSION, BenchmarkSpec
 from experionyx.benchmark.taxonomy import CoverageStatus, UnitKind, UnitStatus
 from experionyx.domain import Run, RunStatus, to_jsonable
+from experionyx.drift.entities import DriftAnalysis
 from experionyx.errors import ExperionyxError
 from experionyx.evaluation.loading import load_evaluation
 from experionyx.evaluation.results import Status
@@ -56,6 +57,7 @@ class Executed:
     interaction_analyses: Mapping[str, str]  # pair -> interaction analysis ID
     profile_id: str | None
     slice_analysis: str | None = None
+    drift_analysis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,7 @@ class Executed:
             "interaction_analyses": dict(self.interaction_analyses),
             "profile_id": self.profile_id,
             **({"slice_analysis": self.slice_analysis} if self.slice_analysis else {}),
+            **({"drift_analysis": self.drift_analysis} if self.drift_analysis else {}),
         }
 
     @classmethod
@@ -82,6 +85,7 @@ class Executed:
             dict(d["interaction_analyses"]),
             d.get("profile_id"),
             d.get("slice_analysis"),
+            d.get("drift_analysis"),
         )
 
 
@@ -490,6 +494,20 @@ def collect(
         else:
             reasons.append("the requested slice analysis did not run")
 
+    # -- drift analysis (only when the benchmark explicitly requested one) ---------------------------------------------------------------------
+    drift_block: dict[str, Any] = {"status": DimensionStatus.UNAVAILABLE.value, "reason": "no drift analysis was requested by this benchmark"}  # fmt: skip
+    drift_fp: str | None = None
+    if spec.drift is not None:
+        drift_block = {"status": DimensionStatus.UNAVAILABLE.value, "reason": ex.errors.get("drift", "the drift analysis did not run")}  # fmt: skip
+        if ex.drift_analysis:
+            da = registry.get(DriftAnalysis, ex.drift_analysis)
+            drift_fp = da.provenance_fingerprint
+            drift_block = {"status": DimensionStatus.DERIVED.value, "analysis_id": da.id, "analysis_status": da.analysis_status, "ordering": to_jsonable(da.summary.get("ordering")), "n_window_pairs": da.summary.get("n_pairs"), "skipped": to_jsonable(da.summary.get("skipped")), "status_counts": to_jsonable(da.summary.get("status_counts")), "pairs": to_jsonable(da.summary.get("pairs")), "source": {"kind": "DRIFT_ANALYSIS", "id": da.id}, "note": "observed distribution differences between the declared windows of the baseline evaluation; not a fault, not a cause"}  # fmt: skip
+            if da.analysis_status != "COMPLETE":
+                reasons.append("the drift analysis has insufficient, unavailable or skipped evidence for some window or result")  # fmt: skip
+        else:
+            reasons.append("the requested drift analysis did not run")
+
     # -- coverage ---------------------------------------------------------------------------------------------------------------------------------
     trials = {s.value: sum(u["status"] == s.value for u in fault_units) for s in UnitStatus}
     pts_total = sum(f.get("points_requested", 0) for f in fam.values())
@@ -564,6 +582,7 @@ def collect(
         "interactions": DimensionStatus.UNAVAILABLE.value if not inter else DimensionStatus.DERIVED.value if any(r["status"] == "DERIVED" for r in inter) else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "failure_modes": fm_status, "reliability_profile": profile["status"],
         **({"slice_analysis": slice_block["status"]} if spec.slices else {}),
+        **({"drift_analysis": drift_block["status"]} if spec.drift is not None else {}),
         "uncertainty": DimensionStatus.DERIVED.value if intervals else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "reproducibility": DimensionStatus.DERIVED.value if responses else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
     }  # fmt: skip
@@ -573,6 +592,7 @@ def collect(
         "failure_modes": {"status": fm_status, "reason": fm_reason, "modes": modes, "discovery_run": ex.discovery_run},
         "reliability_profile": profile,
         **({"slice_analysis": slice_block} if spec.slices else {}),
+        **({"drift_analysis": drift_block} if spec.drift is not None else {}),
         "uncertainty": {"status": section["uncertainty"], "intervals_available": intervals, "caveats": ["intervals are descriptive spreads under each analysis's own method and are not comparable across methods", *sorted({w for r in inter for w in ((r.get("bootstrap") or {}).get("warnings") or [])})]},
         "reproducibility": {"status": section["reproducibility"], "trials_per_family": {k: {"requested": f.get("trials_requested"), "completed": f.get("completed")} for k, f in fam.items() if "trials_requested" in f}, "distinct_seeds": len(spec.seeds), "interactions_by_lifecycle_state": _count(r.get("lifecycle_state") for r in inter if r.get("lifecycle_state")), "unresolved": list(reasons), "replay": "the collect Run can be replayed (`benchmark replay`); re-executing the whole protocol in another registry is the reproduction test"},
     }  # fmt: skip
@@ -592,6 +612,7 @@ def collect(
             "modes": mode_hashes,
             "profile": prof_fp,
             **({"slice_analysis": slice_fp} if spec.slices else {}),
+            **({"drift_analysis": drift_fp} if spec.drift is not None else {}),
         }
     )
     summary = {

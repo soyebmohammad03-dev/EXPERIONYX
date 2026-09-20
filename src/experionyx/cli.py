@@ -35,6 +35,10 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
+from experionyx.drift import engine as drift_engine
+from experionyx.drift.entities import DriftAnalysis, DriftWindow
+from experionyx.drift.registry import DriftRegistry
+from experionyx.drift.spec import ShiftSpec
 from experionyx.errors import (
     ArtifactIntegrityError,
     BenchmarkRefusal,
@@ -1941,6 +1945,171 @@ def _cmd_slice_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+# -- drift ---------------------------------------------------------------------------------------------------
+
+
+def _drift_spec(path: str) -> ShiftSpec:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read drift spec {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExperionyxError("a drift spec file must be a JSON object")
+    return ShiftSpec.from_dict(doc)
+
+
+def _drift_dataset(args: argparse.Namespace, reg: SqliteRegistry, spec: ShiftSpec) -> object:
+    """The baseline's dataset, loaded only if the spec reads a dataset column."""
+    return drift_engine.baseline_dataset(
+        reg, default_registries(entry_points=True), Path(args.workspace), spec
+    )
+
+
+def _dreg(args: argparse.Namespace, reg: SqliteRegistry) -> DriftRegistry:
+    return DriftRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _pairs(a: DriftAnalysis) -> dict[str, Any]:
+    x = a.summary.get("pairs")
+    return dict(x) if isinstance(x, Mapping) else {}
+
+
+def _drift_row(a: DriftAnalysis) -> dict[str, object]:
+    return {
+        "id": a.id, "status": a.analysis_status, "baseline_run_id": a.baseline_run_id,
+        "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id,
+        "provenance_fingerprint": a.provenance_fingerprint, "window_pairs": sorted(_pairs(a)),
+    }  # fmt: skip
+
+
+def _window_row(w: DriftWindow) -> dict[str, object]:
+    return {"id": w.id, "name": w.name, "role": w.role, "ordering": w.ordering_field, "window": w.window().describe()}  # fmt: skip
+
+
+def _cmd_drift_validate(args: argparse.Namespace) -> int:
+    spec = _drift_spec(args.spec)
+    plan = spec.plan()
+    oid = spec.ordering.field
+    out: dict[str, object] = {
+        "valid": True,
+        "spec_id": spec.spec_id,
+        "ordering": oid,
+        "pairs": [
+            {
+                "key": p.key,
+                "reference_window_id": p.reference.window_id(oid),
+                "comparison_window_id": p.comparison.window_id(oid),
+            }
+            for p in plan.pairs
+        ],
+        "skipped": [s.to_dict(oid) for s in plan.skipped],
+        "features": {f.name: f.kind for f in spec.features},
+        "slices": {s.name: s.slice_id for s in spec.slices},
+        "dimensions": list(spec.config.dimensions or ()),
+        "config": spec.config.to_dict(),
+    }
+    if args.preflight:
+        with _open(args.workspace) as reg:
+            res = drift_engine.preflight(
+                reg,
+                LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                spec,
+                _drift_dataset(args, reg, spec),
+            )
+        out["preflight"] = {
+            "ok": True,
+            "windows": {
+                k: {"n_samples": w.n, "sample_digest": w.digest} for k, w in res.windows.items()
+            },
+            "skipped": [s.to_dict(oid) for s in res.skipped],
+        }
+    _emit(
+        out,
+        f"VALID: {spec.spec_id}: {len(plan.pairs)} window pair(s), {len(plan.skipped)} skipped",
+        args,
+    )
+    return 0
+
+
+def _cmd_drift_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        dr = _dreg(args, reg)
+        cols = {k: v for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status)) if v}  # fmt: skip
+        analyses = [_drift_row(a) for a in dr.analyses(**cols)]
+        windows = [_window_row(w) for w in dr.windows(ordering=args.ordering)] if args.windows else []  # fmt: skip
+    _emit({"analyses": analyses, **({"windows": windows} if args.windows else {})}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in analyses), args)  # fmt: skip
+    return 0
+
+
+def _cmd_drift_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        dr = _dreg(args, reg)
+        if args.id.startswith("twn_"):
+            w = dr.window(args.id)
+            used = [a.id for a in dr.analyses() if any(args.id in (p["reference_window_id"], p["comparison_window_id"]) for p in _pairs(a).values())]  # fmt: skip
+            doc: dict[str, object] = {**_window_row(w), "drift_schema": w.drift_schema, "start": w.start, "end": w.end, "start_inclusive": w.start_inclusive, "end_inclusive": w.end_inclusive, "used_by": used}  # fmt: skip
+        else:
+            a = dr.analysis(args.id)
+            doc = {**_drift_row(a), "summary": to_jsonable(a.summary), "provenance": dr.provenance(a.id), "artifacts": [{"path": x.path, "id": x.id} for x in dr.artifacts(a.id)]}  # fmt: skip
+            if args.full:
+                doc["documents"] = {n: dr.document(a.id, n) for n in ("spec", "windows", "feature_results", "distribution_results", "performance_results", "summary")}  # fmt: skip
+    _emit(doc, f"{args.id}: {doc.get('window') or doc.get('status')}", args)
+    return 0
+
+
+def _cmd_drift_windows(args: argparse.Namespace) -> int:
+    spec = _drift_spec(args.spec)
+    with _open(args.workspace) as reg:
+        res = drift_engine.preflight(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), spec, _drift_dataset(args, reg, spec))  # fmt: skip
+    oid = spec.ordering.field
+    rows: list[dict[str, Any]] = []
+    for w in res.windows.values():
+        d: dict[str, Any] = dict(w.to_dict())
+        if not args.ids:
+            d["sample_ids"] = f"{w.n} sample IDs omitted (use --ids)"
+        rows.append(d)
+    doc: dict[str, object] = {"spec_id": spec.spec_id, "ordering": oid, "windows": rows, "pairs": [{"key": k, "reference_window_id": r, "comparison_window_id": c} for k, r, c in res.pairs], "skipped": [s.to_dict(oid) for s in res.skipped]}  # fmt: skip
+    _emit(
+        doc,
+        "\n".join(f"{r['window_id']} {r['window']['role']} n={r['n_samples']}" for r in rows),
+        args,
+    )
+    return 0
+
+
+def _cmd_drift_evaluate(args: argparse.Namespace) -> int:
+    spec = _drift_spec(args.spec)
+    with _open(args.workspace) as reg:
+        run = reg.get(Run, spec.baseline_run)
+        inv = reg.get(Experiment, run.experiment_id).investigation_id
+        out = drift_engine.run_drift_request(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), inv, spec, dataset=_drift_dataset(args, reg, spec))  # fmt: skip
+        a = reg.get(DriftAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
+
+
+def _cmd_drift_compare(args: argparse.Namespace) -> int:
+    """The same computation as `evaluate`, but nothing is stored and no run is created."""
+    spec = _drift_spec(args.spec)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        drift_engine.validate(reg, spec)
+        c = drift_engine.compute(reg, store, spec, _drift_dataset(args, reg, spec))
+    doc: dict[str, object] = {"spec_id": spec.spec_id, "summary": drift_engine.summarize(spec, c), "not_stored": "nothing was stored; use `drift evaluate` to record this analysis"}  # fmt: skip
+    if args.full:
+        doc["feature_results"], doc["distribution_results"], doc["performance_results"] = c.feature_results, c.distribution_results, c.performance_results  # fmt: skip
+    _emit(doc, f"{len(c.resolution.pairs)} window pair(s) compared (not stored)", args)
+    return 0
+
+
+def _cmd_drift_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = drift_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id)  # fmt: skip
+    _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
+    return 0 if out["deterministic"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -2534,6 +2703,46 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-members", type=int)
     slfmt(p)
     p.set_defaults(func=_cmd_slice_compare)
+
+    dr = group(
+        "drift",
+        "temporal and distribution shift between explicit windows (observed differences; no drift score, no causal claim)",
+    )
+    p = dr.add_parser("validate", help="parse and normalize a drift spec; prints its identity and window plan (--preflight also checks the data)")  # fmt: skip
+    p.add_argument("spec")
+    p.add_argument("--preflight", action="store_true", help="also load the baseline and dataset and refuse what the data cannot support")  # fmt: skip
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_validate)
+    p = dr.add_parser("list", help="list drift analyses (and optionally registered windows)")
+    p.add_argument("--baseline-run")
+    p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
+    p.add_argument("--windows", action="store_true", help="also list registered windows")
+    p.add_argument("--ordering", help="filter windows by ordering field")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_list)
+    p = dr.add_parser("inspect", help="a drift analysis (dan_) with provenance, or a window (twn_)")
+    p.add_argument("id")
+    p.add_argument("--full", action="store_true", help="include every stored document")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_inspect)
+    p = dr.add_parser("windows", help="resolve a spec's windows against the baseline data: members, digests, skipped windows (nothing is stored)")  # fmt: skip
+    p.add_argument("spec")
+    p.add_argument("--ids", action="store_true", help="list member sample IDs")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_windows)
+    p = dr.add_parser("evaluate", help="run a drift analysis as a new run (exit 3 if some evidence is insufficient, unavailable or skipped)")  # fmt: skip
+    p.add_argument("spec")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_evaluate)
+    p = dr.add_parser("compare", help="compute a drift analysis without storing anything")
+    p.add_argument("spec")
+    p.add_argument("--full", action="store_true", help="include every per-feature result")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_compare)
+    p = dr.add_parser("replay", help="replay the analysis as a NEW run and compare every document; exit 1 on any difference")  # fmt: skip
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_drift_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

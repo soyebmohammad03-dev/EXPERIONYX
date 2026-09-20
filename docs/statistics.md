@@ -103,3 +103,13 @@ experionyx stats list|inspect|verify
   (different faults, severities, seeds); it describes those runs, not a population rate.
 - Analysis records are database entries (their payload is complete machine-readable JSON); they do not
   write a separate run artifact.
+
+## Reuse by drift analysis (Phase 12)
+
+The drift engine ([drift.md](drift.md)) reuses this core rather than adding its own inference: Wilson
+intervals for class and category proportions, `effect_sizes` and `bootstrap_interval` for the mean
+difference of a numeric feature, `compare` (unpaired) for the per-sample performance measure and
+`adjust_pvalues` for the comparison families. Its only new procedure is a seeded permutation test of a
+distribution distance (KS, Jensen-Shannon), which follows this module's conventions: exact when the
+number of rearrangements is at most `EXACT_LIMIT`, otherwise `(hits + 1) / (permutations + 1)` with a
+recorded seed.

@@ -46,6 +46,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     uncertainty. Missing metadata is never a match, thin slices are flagged, no group is ranked or scored,
     and nothing says why a slice behaves differently ([slices.md](slices.md)).
 
+15. **A distribution change is an observation, not an explanation.** Drift results compare explicit
+    windows under a declared ordering, keep magnitude and statistical evidence apart, correct for many
+    simultaneous comparisons on request, and never claim that a change caused a failure or is concept
+    drift ([drift.md](drift.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

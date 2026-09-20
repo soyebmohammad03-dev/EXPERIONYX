@@ -265,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 11
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +303,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 11
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -344,7 +344,7 @@ def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
         assert new
         assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 11
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "statistical_analyses" in tables
         assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
@@ -385,7 +385,7 @@ def test_every_prior_version_migrates_to_slice_tables_and_accepts_slices(
         assert created2
         assert again.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 10
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 11
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"slices", "slice_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM slices").fetchone()[0] == 2
@@ -405,3 +405,75 @@ def test_slice_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 9  # still the old version
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "slices" not in tables  # nothing half-applied
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+def test_every_prior_version_migrates_to_drift_tables_and_accepts_windows(
+    tmp_path: Path, version: int
+) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.drift.entities import DriftAnalysis, DriftWindow
+    from experionyx.drift.registry import DriftRegistry
+    from experionyx.drift.spec import Ordering, Role, TemporalWindow
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        dr = DriftRegistry(reg)
+        w = TemporalWindow(Role.REFERENCE, 0, 40)
+        rec, created = dr.register_window(w, Ordering("index"), datetime(2026, 1, 1, tzinfo=UTC))
+        assert created and rec.id == w.window_id("index")
+        assert reg.get(DriftWindow, rec.id) == rec  # the new table works at once
+        again, created2 = dr.register_window(
+            TemporalWindow(Role.REFERENCE, 0, 40, name="renamed"), Ordering("index")
+        )
+        assert not created2 and again == rec  # equal definitions are one record
+        other, created3 = dr.register_window(
+            TemporalWindow(Role.COMPARISON, 0, 40), Ordering("index")
+        )
+        assert created3 and other.id != rec.id
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 11
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"temporal_windows", "drift_analyses"} <= tables
+        assert raw.execute("SELECT COUNT(*) FROM temporal_windows").fetchone()[0] == 2
+        assert raw.execute("SELECT COUNT(*) FROM drift_analyses").fetchone()[0] == 0
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+    assert DriftAnalysis.PREFIX == "dan"
+    assert DriftWindow.PREFIX == "twn"
+
+
+def test_drift_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v10.sqlite"
+    make_database(path, 10)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE drift_analyses (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 10  # still the old version
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "temporal_windows" not in tables  # nothing half-applied
+
+
+def test_a_v11_database_rejects_deleting_or_rewriting_drift_records(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.drift.registry import DriftRegistry
+    from experionyx.drift.spec import Ordering, Role, TemporalWindow
+
+    path = tmp_path / "v11.sqlite"
+    with SqliteRegistry(path) as reg:
+        rec, _ = DriftRegistry(reg).register_window(
+            TemporalWindow(Role.REFERENCE, 0, 5),
+            Ordering("index"),
+            datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    with sqlite3.connect(path) as raw:
+        with pytest.raises(sqlite3.DatabaseError, match="cannot be deleted"):
+            raw.execute("DELETE FROM temporal_windows")
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            raw.execute("UPDATE temporal_windows SET payload = '{}' WHERE id = ?", (rec.id,))
+        raw.execute("SELECT 1")

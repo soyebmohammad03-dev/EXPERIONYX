@@ -11,6 +11,7 @@ from typing import Any, Self
 
 import experionyx.validation as v
 from experionyx.domain import to_jsonable
+from experionyx.drift.spec import ShiftSpec
 from experionyx.errors import ValidationError
 from experionyx.evaluation.config import EvaluationConfig
 from experionyx.hashing import HASH_PREFIX, content_hash
@@ -18,6 +19,9 @@ from experionyx.interactions.config import InteractionConfig
 from experionyx.slices.analysis import SliceConfig
 from experionyx.slices.spec import SliceSpec
 
+DRIFT_PLACEHOLDER_RUN = (
+    "run_" + "0" * 32
+)  # stands in for the baseline, which does not exist until the protocol runs
 ENGINE_VERSION = "1.0.0"  # the benchmark protocol/analysis methodology; bump when either changes
 SPEC_SCHEMA_VERSION = 1
 
@@ -223,6 +227,9 @@ class BenchmarkSpec:
         SliceSpec, ...
     ] = ()  # explicit request for a Phase 11 slice analysis (empty: none)
     slice_config: SliceConfig = field(default_factory=SliceConfig)
+    drift: ShiftSpec | None = (
+        None  # explicit request for a Phase 12 drift analysis; its baseline_run is a placeholder here and is replaced by the benchmark's baseline
+    )
 
     def __post_init__(self) -> None:
         if self.schema_version != SPEC_SCHEMA_VERSION:
@@ -283,6 +290,10 @@ class BenchmarkSpec:
         ):  # explicit request only; keeps the identity of every earlier benchmark unchanged
             d["slices"] = [x.to_dict() for x in self.slices]
             d["slice_config"] = self.slice_config.to_dict()
+        if (
+            self.drift is not None
+        ):  # explicit request only; keeps every earlier benchmark's identity
+            d["drift"] = {k: x for k, x in self.drift.to_dict().items() if k != "baseline_run"}
         return d
 
     @property
@@ -315,6 +326,7 @@ class BenchmarkSpec:
             "schema_version",
             "slices",
             "slice_config",
+            "drift",
         }
         extra = set(d) - known
         missing = {"name", "version", "model", "dataset", "faults", "seeds"} - set(d)
@@ -340,4 +352,5 @@ class BenchmarkSpec:
             BenchmarkLimits.from_dict(d.get("limits", {})), int(d.get("schema_version", SPEC_SCHEMA_VERSION)),
             tuple(SliceSpec.from_dict(x) for x in d.get("slices", [])),
             SliceConfig.from_dict(d["slice_config"]) if d.get("slice_config") else SliceConfig(),
+            ShiftSpec.from_dict({**d["drift"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("drift") else None,
         )  # fmt: skip

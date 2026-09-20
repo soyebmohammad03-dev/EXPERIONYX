@@ -3,6 +3,7 @@ EXISTING machinery (fault laboratory, failure discovery, interaction analysis, r
 a final `collect` Run reads the persisted evidence and writes the coverage, results and artifacts,
 so the benchmark itself has provenance and can be replayed. Nothing is re-implemented here."""
 
+import dataclasses
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -31,6 +32,7 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
+from experionyx.drift.engine import run_drift_request
 from experionyx.errors import BenchmarkError, ExperionyxError, ValidationError
 from experionyx.evaluation.config import _thaw
 from experionyx.execution import Executor, RunContext, resolve_procedure
@@ -237,6 +239,21 @@ def run_benchmark(
                 errors["slices"] = f"the slice analysis run ended {so.status.value}"
         except (ExperionyxError, ValueError) as exc:
             errors["slices"] = f"{type(exc).__name__}: {exc}"
+    drift_analysis_id: str | None = None
+    if spec.drift is not None:
+        try:
+            do = run_drift_request(
+                registry,
+                store,
+                executor,
+                inv,
+                dataclasses.replace(spec.drift, baseline_run=baseline),
+            )
+            drift_analysis_id = do.analysis_id
+            if drift_analysis_id is None:
+                errors["drift"] = f"the drift analysis run ended {do.status.value}"
+        except (ExperionyxError, ValueError) as exc:
+            errors["drift"] = f"{type(exc).__name__}: {exc}"
     profile_id: str | None = None
     if spec.profile:
         try:
@@ -252,6 +269,7 @@ def run_benchmark(
                     tuple(analyses.values()),
                     tuple(mode_ids),
                     (slice_analysis_id,) if slice_analysis_id else (),
+                    (drift_analysis_id,) if drift_analysis_id else (),
                 ),
             )
             profile_id = pr.profile_id
@@ -269,6 +287,7 @@ def run_benchmark(
         analyses,
         profile_id,
         slice_analysis_id,
+        drift_analysis_id,
     )
     conf = ConfigurationRef(
         {

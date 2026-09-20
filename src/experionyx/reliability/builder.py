@@ -10,6 +10,7 @@ from typing import Any
 
 from experionyx.artifacts import ArtifactStore
 from experionyx.domain import Artifact, Run, RunStatus, to_jsonable
+from experionyx.drift.entities import DriftAnalysis
 from experionyx.errors import ExperionyxError, ProfileRefusal
 from experionyx.evaluation.loading import load_evaluation
 from experionyx.evaluation.results import EvaluationResult, Status
@@ -266,6 +267,18 @@ def check_compatibility(
         ):
             if want != got:
                 issues.append(_issue("INCOMPATIBLE_SLICE_ANALYSIS", f"{label} {want}", f"{got}", f"the slice analysis was made over a different {label}", sid))  # fmt: skip
+    for did in spec.drift_analyses:
+        try:
+            da = registry.get(DriftAnalysis, did)
+        except ExperionyxError:
+            issues.append(_issue("DRIFT_ANALYSIS_MISSING", "a registered drift analysis", did, "it cannot be summarized", did))  # fmt: skip
+            continue
+        for label, want, got in (
+            ("baseline run", spec.baseline_run, da.baseline_run_id),
+            ("dataset fingerprint", ctx.dataset_fingerprint, da.dataset_fingerprint),
+        ):
+            if want != got:
+                issues.append(_issue("INCOMPATIBLE_DRIFT_ANALYSIS", f"{label} {want}", f"{got}", f"the drift analysis was made over a different {label}", did))  # fmt: skip
     if issues:
         raise ProfileRefusal(tuple(issues))
 
@@ -815,6 +828,33 @@ def _slices(registry: Registry, spec: ProfileSpec, ctx: Context, acc: _Acc) -> N
     acc.ref(Dimension.SLICE_SENSITIVITY, RefKind.RUN, spec.baseline_run, "baseline slices/classes")
 
 
+def _drift(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
+    """Distribution-shift evidence as one dimension. Statuses and counts are copied as recorded;
+    nothing links a distribution change to any other dimension, and no score is formed."""
+    if not spec.drift_analyses:
+        acc.dim(
+            Dimension.DISTRIBUTION_SHIFT,
+            DimensionStatus.UNAVAILABLE,
+            [],
+            reason="no drift analysis was referenced by the profile",
+        )
+        return
+    rows: list[dict[str, Any]] = []
+    for did in spec.drift_analyses:
+        da = registry.get(DriftAnalysis, did)
+        s = da.summary
+        rows.append({"source": {"kind": "DRIFT_ANALYSIS", "id": did, "spec_id": da.spec_id, "provenance_fingerprint": da.provenance_fingerprint}, "analysis_status": da.analysis_status, "ordering": to_jsonable(s.get("ordering")), "n_window_pairs": s.get("n_pairs"), "skipped_windows": to_jsonable(s.get("skipped")), "status_counts": to_jsonable(s.get("status_counts")), "correction": to_jsonable(s.get("correction")), "pairs": to_jsonable(s.get("pairs")), "note": "observed differences between explicit windows, copied as recorded; not an explanation of any other dimension"})  # fmt: skip
+        acc.ref(Dimension.DISTRIBUTION_SHIFT, RefKind.DRIFT_ANALYSIS, did, da.analysis_status)
+    derived = any((r["status_counts"] or {}).get("DERIVED") for r in rows)
+    acc.dim(
+        Dimension.DISTRIBUTION_SHIFT,
+        DimensionStatus.DERIVED if derived else DimensionStatus.INSUFFICIENT_EVIDENCE,
+        rows,
+        reason=None if derived else "no drift result had enough valid samples",
+        note="a distribution difference between windows is not shown to cause any failure or degradation recorded elsewhere in this profile",
+    )
+
+
 def _reproducibility(
     registry: Registry,
     spec: ProfileSpec,
@@ -967,6 +1007,16 @@ def provenance_fingerprint(
             "modes": {m: registry.get(FailureMode, m).content_hash() for m in spec.failure_modes},
             **(
                 {
+                    "drift_analyses": {
+                        d: registry.get(DriftAnalysis, d).provenance_fingerprint
+                        for d in spec.drift_analyses
+                    }
+                }
+                if spec.drift_analyses
+                else {}
+            ),
+            **(
+                {
                     "slice_analyses": {
                         s: registry.get(SliceAnalysis, s).provenance_fingerprint
                         for s in spec.slice_analyses
@@ -988,6 +1038,7 @@ def build(registry: Registry, store: ArtifactStore, spec: ProfileSpec) -> Built:
     modes = _modes(registry, spec, acc)
     inters = _interactions(registry, spec, acc)
     _slices(registry, spec, ctx, acc)
+    _drift(registry, spec, acc)
     runs = [spec.baseline_run]
     for fid in spec.fault_experiments:
         runs += [

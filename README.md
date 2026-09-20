@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 11 (slice analysis).** The typed domain model, a local SQLite registry,
+> **Status: Phase 12 (temporal and distribution shift).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -93,6 +93,10 @@ See [docs/architecture.md](docs/architecture.md) and
   three-valued membership that never treats missing metadata as a match, per-slice metrics with uncertainty,
   explicit comparisons, and per-slice fault, failure-mode and interaction evidence. No group is ranked and no
   fairness score is produced.
+- Temporal and distribution shift ([docs/drift.md](docs/drift.md)): explicitly ordered, reproducible windows;
+  covariate (per feature), label, prediction and performance differences with uncertainty and Phase 10
+  multiple-comparison correction; slice-aware; evidence links to failure modes, reliability profiles and
+  benchmarks. No drift score, no causal or concept-drift claim.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

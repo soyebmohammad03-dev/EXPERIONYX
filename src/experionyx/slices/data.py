@@ -74,9 +74,15 @@ def _jsonable(x: object) -> object:
 
 
 def feature_columns(
-    dataset: DatasetAdapter, split: str | None, fields: Iterable[str], indices: set[int]
-) -> dict[str, dict[int, float]]:
-    """`feature:<name|index>` -> {sample index: value} for the requested samples only."""
+    dataset: DatasetAdapter,
+    split: str | None,
+    fields: Iterable[str],
+    indices: set[int],
+    *,
+    raw: bool = False,
+) -> dict[str, dict[int, Any]]:
+    """`feature:<name|index>` -> {sample index: value} for the requested samples only. Values are
+    floats (NaN when unusable) unless `raw`, which returns each cell as stored (None if absent)."""
     wanted = sorted({f for f in fields if f.startswith(FEATURE_PREFIX)})
     if not wanted:
         return {}
@@ -91,16 +97,18 @@ def feature_columns(
             col[f] = int(key)
         else:
             raise SliceDataError(f"{f!r} is not a feature of this dataset (names: {list(names)})")
-    out: dict[str, dict[int, float]] = {f: {} for f in wanted}
+    out: dict[str, dict[int, Any]] = {f: {} for f in wanted}
     for batch in dataset.batches(1024, split):
         rows = list(batch.inputs)  # type: ignore[call-overload]
         for j, idx in enumerate(batch.indices):
             if idx in indices:
                 for f, c in col.items():
                     try:
-                        out[f][idx] = float(rows[j][c])
+                        out[f][idx] = rows[j][c] if raw else float(rows[j][c])
                     except (IndexError, TypeError, ValueError):
-                        out[f][idx] = math.nan  # unusable: the evaluator will call it UNKNOWN
+                        out[f][idx] = (
+                            None if raw else math.nan
+                        )  # unusable: UNKNOWN to the evaluator
     return out
 
 

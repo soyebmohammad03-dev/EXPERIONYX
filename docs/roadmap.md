@@ -14,7 +14,7 @@
 9. Robustness Benchmark Engine (done)
 10. Statistical Analysis & Evidence Engine (done; BCa for interaction contrasts and control-variability modelling remain open)
 11. Slice & Subgroup Analysis Engine (done)
-12. Drift Laboratory
+12. Temporal & Distribution Shift Engine (done; also the scheduled full-project verification)
 13. Evidence Graph
 14. Reliability Analysis (statistical, building on profiles and benchmarks)
 15. Experiment Planner

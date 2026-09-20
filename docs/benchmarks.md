@@ -13,6 +13,7 @@ produces a robustness score, ranking or verdict, and it never treats missing cov
 |---|---|
 | `name`, `version` | the definition's identity; `version` is `major.minor.patch` |
 | `model`, `dataset` | registered record IDs (`mdl_...`, `dst_...`) |
+| `drift` | optional Phase 12 drift request (a drift spec without `baseline_run`); adds a `drift_analysis` section and a profile reference, and leaves every earlier benchmark identity unchanged |
 | `evaluation` | an `EvaluationConfig` (metrics, split, slices, bootstrap); the control uses it too |
 | `faults` | grids: `name`, `fault`, `parameters`, optional `sweep_parameter` + `values`, optional `fault_version` pin, optional `scope_fraction` |
 | `seeds` | trial seeds; every (grid point x seed) is a real run |
