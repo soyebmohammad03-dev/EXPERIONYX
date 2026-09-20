@@ -16,6 +16,7 @@ from typing import Self
 
 from experionyx.adapters.records import RegisteredDataset, RegisteredModel
 from experionyx.benchmark.entities import Benchmark, BenchmarkResult, BenchmarkUnit
+from experionyx.data_quality.entities import QualityAnalysis, QualityCheck
 from experionyx.domain import (
     Artifact,
     Claim,
@@ -64,7 +65,8 @@ from experionyx.stats.entities import StatisticalAnalysis
 # PRAGMA user_version. 2: provenance+outcomes. 3: models+datasets. 4: faults. 5: failures.
 # 6: interactions. 7: reliability profiles. 8: benchmarks. 9: statistical analyses.
 # 10: slices and slice analyses. 11: temporal windows and drift analyses.
-DB_SCHEMA_VERSION = 11
+# 12: data quality analyses and check results.
+DB_SCHEMA_VERSION = 12
 
 
 @dataclass(frozen=True)
@@ -264,6 +266,22 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("spec_id", "baseline_run_id", "dataset_fingerprint", "analysis_status"),
         since=11,
     ),
+    QualityAnalysis: _Spec(
+        "quality_analyses",
+        refs=(
+            ("investigation_id", Investigation),
+            ("run_id", Run),
+            ("dataset_id", RegisteredDataset),
+        ),
+        plain=("spec_id", "dataset_fingerprint", "analysis_status"),
+        since=12,
+    ),
+    QualityCheck: _Spec(
+        "quality_checks",
+        refs=(("analysis_id", QualityAnalysis),),
+        plain=("check_id", "check_type", "status"),
+        since=12,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -394,6 +412,12 @@ def _migrate_10_to_11(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_11_to_12(conn: sqlite3.Connection) -> None:
+    """Phase 13: data quality analyses and check results (new tables only)."""
+    for statement in _ddl(upto=12, since=12):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -405,6 +429,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     8: _migrate_8_to_9,
     9: _migrate_9_to_10,
     10: _migrate_10_to_11,
+    11: _migrate_11_to_12,
 }
 
 

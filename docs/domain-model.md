@@ -73,6 +73,12 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Data quality records (Phase 13)
+
+`QualityAnalysis` (`qan_`) is one analysis of a registered dataset; `QualityCheck` (`qck_`) is one check
+result on one scope. Measurements, violations and evidence live in digest-verified artifacts. See
+[data-quality.md](data-quality.md).
+
 ## Drift records (Phase 12)
 
 `DriftWindow` (`twn_`) is a registered temporal window definition (identity: ordering field, role,

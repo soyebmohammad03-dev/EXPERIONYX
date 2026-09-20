@@ -60,6 +60,7 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx benchmark compare <brs_…> <brs_…>` | raw differences between two results of an identical protocol (refused otherwise; no winner) |
 | `experionyx benchmark replay <brs_…>` | replay the collect run as a new run and compare; exit 1 unless verified deterministic |
 | `experionyx stats compare\|bootstrap\|proportion\|correct …` | deterministic, recorded statistics over inline values, interaction trials, fault trials or run artifacts; see [statistics.md](statistics.md) |
+| `experionyx data-quality validate\|run\|list\|inspect\|checks\|replay …` | explicit data-quality checks on a registered dataset; `run` exits 3 if any check failed or evidence is incomplete, `replay` exits 1 on any difference; see [data-quality.md](data-quality.md) |
 | `experionyx drift validate\|windows\|compare\|evaluate\|list\|inspect\|replay …` | explicit temporal windows, distribution shift and performance drift between them; `evaluate` exits 3 if some evidence is insufficient, unavailable or skipped, `replay` exits 1 on any difference; see [drift.md](drift.md) |
 | `experionyx slice validate\|register\|list\|inspect\|evaluate\|analyze\|compare …` | typed slice definitions, membership over a baseline run, per-slice analyses (exit 3 if some evidence is insufficient); see [slices.md](slices.md) |
 | `experionyx stats list\|inspect\|verify <sta_…>` | registered analyses; `verify` recomputes from the recorded sources and exits 1 unless reproduced |

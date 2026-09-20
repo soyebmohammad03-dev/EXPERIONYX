@@ -38,3 +38,12 @@ types, methods, seed, correction and thresholds, slice identities and software v
 ([drift.md](drift.md)). `experionyx drift replay` re-executes it as a new run and compares all six
 stored documents; a document that no longer matches its digest is refused, not reported as a
 difference. The permutation tests and bootstraps are seeded, and results do not depend on input order.
+
+## Data quality analyses (Phase 13)
+
+A quality analysis is a Run. Its provenance fingerprint covers the dataset fingerprint, adapter,
+columns, per-split sample digests, the whole specification, check identities, slice membership digests
+and software versions ([data-quality.md](data-quality.md)). `experionyx data-quality replay` re-executes it
+as a new run and compares all five stored documents; a document that no longer matches its digest is
+refused, not reported as a difference. Permutation tests and bootstraps are seeded and do not depend on
+row or column order.

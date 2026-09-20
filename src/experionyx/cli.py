@@ -22,6 +22,10 @@ from experionyx.benchmark.entities import Benchmark, BenchmarkResult
 from experionyx.benchmark.protocol import validation_report as benchmark_validation
 from experionyx.benchmark.registry import BenchmarkRegistry
 from experionyx.benchmark.spec import BenchmarkSpec
+from experionyx.data_quality import engine as quality_engine
+from experionyx.data_quality.entities import QualityAnalysis, QualityCheck
+from experionyx.data_quality.registry import QualityRegistry
+from experionyx.data_quality.spec import CHECK_DOCS, QualitySpec
 from experionyx.demos import DEMOS, run_demo
 from experionyx.domain import (
     Artifact,
@@ -2110,6 +2114,116 @@ def _cmd_drift_replay(args: argparse.Namespace) -> int:
     return 0 if out["deterministic"] else 1
 
 
+# -- data quality --------------------------------------------------------------------------------------------
+
+
+def _quality_spec(path: str) -> QualitySpec:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read quality spec {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExperionyxError("a quality spec file must be a JSON object")
+    return QualitySpec.from_dict(doc)
+
+
+def _qreg(args: argparse.Namespace, reg: SqliteRegistry) -> QualityRegistry:
+    return QualityRegistry(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR))
+
+
+def _quality_dataset(args: argparse.Namespace, reg: SqliteRegistry, spec: QualitySpec) -> object:
+    return quality_engine.load_dataset(
+        reg, default_registries(entry_points=True), Path(args.workspace), spec
+    )
+
+
+def _quality_row(a: QualityAnalysis) -> dict[str, object]:
+    return {"id": a.id, "status": a.analysis_status, "dataset_id": a.dataset_id, "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id, "provenance_fingerprint": a.provenance_fingerprint, "status_counts": to_jsonable(a.summary.get("status_counts"))}  # fmt: skip
+
+
+def _check_row(c: QualityCheck) -> dict[str, object]:
+    return {"id": c.id, "check_id": c.check_id, "check_type": c.check_type, "scope": c.scope, "status": c.status, "reason": c.reason}  # fmt: skip
+
+
+def _cmd_quality_validate(args: argparse.Namespace) -> int:
+    spec = _quality_spec(args.spec)
+    out: dict[str, object] = {"valid": True, "spec_id": spec.spec_id, "dataset_id": spec.dataset_id, "checks": [{"check_id": c.check_id, "type": c.type} for c in spec.checks], "splits": list(spec.splits), "features": {f.name: f.kind for f in spec.features}, "slices": {s.name: s.slice_id for s in spec.slices}, "config": spec.config.to_dict()}  # fmt: skip
+    if args.preflight:
+        with _open(args.workspace) as reg:
+            tables = quality_engine.preflight(reg, spec, _quality_dataset(args, reg, spec))
+        out["preflight"] = {"ok": True, "splits": {str(s): {"n_rows": t.n, "sample_digest": t.digest()} for s, t in tables.items()}}  # fmt: skip
+    _emit(out, f"VALID: {spec.spec_id}: {len(spec.checks)} check(s)", args)
+    return 0
+
+
+def _cmd_quality_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        cols = {
+            k: v
+            for k, v in (("dataset_id", args.dataset_id), ("analysis_status", args.status))
+            if v
+        }
+        rows = [_quality_row(a) for a in _qreg(args, reg).analyses(**cols)]
+    _emit(
+        {"analyses": rows}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in rows), args
+    )
+    return 0
+
+
+def _cmd_quality_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        qr = _qreg(args, reg)
+        if args.id.startswith("qck_"):
+            c = reg.get(QualityCheck, args.id)
+            doc: dict[str, object] = {
+                **_check_row(c),
+                "analysis_id": c.analysis_id,
+                "evidence": to_jsonable(c.evidence),
+            }
+        else:
+            a = qr.analysis(args.id)
+            doc = {**_quality_row(a), "summary": to_jsonable(a.summary), "provenance": qr.provenance(a.id), "artifacts": [{"path": x.path, "id": x.id} for x in qr.artifacts(a.id)]}  # fmt: skip
+            if args.full:
+                doc["documents"] = {n: qr.document(a.id, n) for n in ("spec", "checks", "observations", "violations", "summary")}  # fmt: skip
+    _emit(doc, f"{args.id}: {doc.get('status')}", args)
+    return 0
+
+
+def _cmd_quality_checks(args: argparse.Namespace) -> int:
+    if args.catalog or not args.id:
+        doc: dict[str, object] = {"check_types": CHECK_DOCS}
+        _emit(doc, "\n".join(f"{k}: {v}" for k, v in CHECK_DOCS.items()), args)
+        return 0
+    with _open(args.workspace) as reg:
+        cols = {k: v for k, v in (("check_type", args.type), ("status", args.status)) if v}
+        rows = [_check_row(c) for c in _qreg(args, reg).checks(args.id, **cols)]
+    _emit(
+        {"analysis_id": args.id, "checks": rows},
+        "\n".join(f"{r['check_type']} {r['scope']} {r['status']}" for r in rows),
+        args,
+    )
+    return 0
+
+
+def _cmd_quality_run(args: argparse.Namespace) -> int:
+    spec = _quality_spec(args.spec)
+    with _open(args.workspace) as reg:
+        inv = quality_engine.baseline_investigation(reg, args.investigation)
+        out = quality_engine.run_quality_request(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), inv, spec, dataset=_quality_dataset(args, reg, spec))  # fmt: skip
+        a = reg.get(QualityAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    counts = {} if a is None else dict(a.summary.get("status_counts", {}))  # type: ignore[call-overload]
+    return 0 if a is not None and a.analysis_status == "COMPLETE" and not counts.get("FAIL") else 3
+
+
+def _cmd_quality_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = quality_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id)  # fmt: skip
+    _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
+    return 0 if out["deterministic"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -2743,6 +2857,60 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_replay)
+
+    dq = group(
+        "data-quality",
+        "data-quality checks on registered datasets (multidimensional evidence; no quality score, no universal verdict)",
+    )
+    p = dq.add_parser(
+        "validate",
+        help="parse and normalize a quality spec; prints its identity (--preflight also checks the data)",
+    )
+    p.add_argument("spec")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="also load the dataset and refuse what it cannot support",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_validate)
+    p = dq.add_parser("list", help="list quality analyses")
+    p.add_argument("--dataset-id")
+    p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_list)
+    p = dq.add_parser(
+        "inspect", help="a quality analysis (qan_) with provenance, or one check result (qck_)"
+    )
+    p.add_argument("id")
+    p.add_argument("--full", action="store_true", help="include every stored document")
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_inspect)
+    p = dq.add_parser("checks", help="the check catalog, or the per-check results of an analysis")
+    p.add_argument("id", nargs="?", help="analysis ID (qan_); omit for the catalog")
+    p.add_argument("--catalog", action="store_true")
+    p.add_argument("--type")
+    p.add_argument(
+        "--status",
+        choices=["PASS", "FAIL", "WARNING", "INCONCLUSIVE", "UNAVAILABLE", "NOT_APPLICABLE"],
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_checks)
+    p = dq.add_parser(
+        "run",
+        help="run a quality analysis as a new run (exit 3 if any check FAILED or evidence is incomplete)",
+    )
+    p.add_argument("spec")
+    p.add_argument("--investigation", help="investigation ID (default: the only one)")
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_run)
+    p = dq.add_parser(
+        "replay",
+        help="replay the analysis as a NEW run and compare every document; exit 1 on any difference",
+    )
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_quality_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

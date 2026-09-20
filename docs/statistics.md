@@ -113,3 +113,11 @@ difference of a numeric feature, `compare` (unpaired) for the per-sample perform
 distribution distance (KS, Jensen-Shannon), which follows this module's conventions: exact when the
 number of rearrangements is at most `EXACT_LIMIT`, otherwise `(hits + 1) / (permutations + 1)` with a
 recorded seed.
+
+## Reuse by data quality analysis (Phase 13)
+
+The data-quality engine ([data-quality.md](data-quality.md)) reuses this core for every inference:
+Wilson intervals for missing-value rates and class proportions, `compare` (unpaired) on 0/1 indicators
+for missingness and validity rate differences between groups, and `adjust_pvalues` per comparison
+family. Its own procedures are descriptive: Tukey/MAD outlier rules, population skewness and kurtosis,
+Pearson correlation and value purity as leakage *indicators*. None of them is a test or a verdict.

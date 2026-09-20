@@ -51,6 +51,11 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     simultaneous comparisons on request, and never claim that a change caused a failure or is concept
     drift ([drift.md](drift.md)).
 
+16. **Data quality is multidimensional evidence, not a score.** Checks report a status per scope under
+    configured expectations; warnings need interpretation, statistical anomalies are not data errors,
+    leakage indicators are not proof, missingness can be informative and class imbalance is
+    context-dependent ([data-quality.md](data-quality.md)).
+
 The deterministic scientific core never depends on a paid API or an LLM. Any LLM use must be
 optional and outside that core.
 

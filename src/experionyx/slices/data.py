@@ -150,6 +150,11 @@ def dataset_for_run(
     if not provs or provs[0].inputs is None or provs[0].inputs.dataset is None:
         return None
     rec = registry.get(RegisteredDataset, provs[0].inputs.dataset.record_id)
+    return load_dataset_record(adapters, inputs_root, rec)
+
+
+def load_dataset_record(adapters: Any, inputs_root: Any, rec: RegisteredDataset) -> DatasetAdapter:
+    """A registered dataset's adapter, loaded from its source and fingerprint-verified."""
     cls = adapters.datasets.resolve(rec.adapter)
     src = rec.source
     if src is None:
@@ -170,6 +175,7 @@ __all__ = [
     "dataset_for_run",
     "feature_columns",
     "load_baseline",
+    "load_dataset_record",
     "run_rows",
     "sample_table",
 ]

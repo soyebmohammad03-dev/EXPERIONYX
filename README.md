@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 12 (temporal and distribution shift).** The typed domain model, a local SQLite registry,
+> **Status: Phase 13 (data quality laboratory).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -97,6 +97,11 @@ See [docs/architecture.md](docs/architecture.md) and
   covariate (per feature), label, prediction and performance differences with uncertainty and Phase 10
   multiple-comparison correction; slice-aware; evidence links to failure modes, reliability profiles and
   benchmarks. No drift score, no causal or concept-drift claim.
+- Data quality laboratory ([docs/data-quality.md](docs/data-quality.md)): a versioned, deterministic quality
+  specification and typed checks (schema, missingness, duplicates and identifiers, numeric and categorical
+  validity, target quality, leakage indicators, split and temporal checks, group comparisons) with explicit
+  statuses, exact affected rows, Phase 10 statistics, optional slices and windows, and replay. No quality
+  score; warnings are evidence, not verdicts.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

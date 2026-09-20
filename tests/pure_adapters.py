@@ -167,7 +167,9 @@ class ListDatasetAdapter(BaseDatasetAdapter):
     def _target_schema(self) -> TensorSchema | None:
         if self._payload.get("task") != "CLASSIFICATION" or self._targets is None:
             return None
-        return TensorSchema(class_labels=tuple(sorted(set(self._targets))))
+        return TensorSchema(
+            class_labels=tuple(sorted({t for t in self._targets if t is not None}, key=repr))
+        )
 
     def _feature_names(self) -> tuple[str, ...] | None:
         names = self._payload.get("feature_names")
