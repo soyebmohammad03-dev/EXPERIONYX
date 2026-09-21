@@ -73,6 +73,13 @@ mutable. See [interactions.md](interactions.md).
 A profile stores metadata and per-dimension statuses only; observations live in a digest-verified
 artifact. See [reliability.md](reliability.md).
 
+## Calibration records (Phase 15)
+
+`CalibrationAnalysis` (`cba_`) is one calibration & uncertainty analysis over a baseline run; `CalibrationResult`
+(`cbr_`) is one analyzed context (baseline, calibrated evaluation part, slice, window or stress trial) with its
+status and headline metrics. Bins, per-sample evidence, intervals and comparisons live in digest-verified run
+artifacts. Both are append-only. See [calibration.md](calibration.md).
+
 ## Stress records (Phase 14)
 
 `StressAnalysis` (`sxa_`) is one stress experiment over a validated baseline; `StressTrial` (`sxt_`) is one

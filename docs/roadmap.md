@@ -16,10 +16,11 @@
 11. Slice & Subgroup Analysis Engine (done)
 12. Temporal & Distribution Shift Engine (done; also the scheduled full-project verification)
 13. Data Quality Laboratory (done)
-14. Model Stress Laboratory (done; also the scheduled full-project verification)
-15. Evidence Graph
-16. Reliability Analysis (statistical, building on profiles and benchmarks)
-17. Experiment Planner
-18. Research validation
-19. Advanced UI/API
-20. Public release / reproducibility package
+14. Model Stress Laboratory (done)
+15. Calibration & Uncertainty Laboratory (done; calibration is measured on stored predictions, not a new score; epistemic/aleatoric decomposition, ensembles and stochastic prediction remain unavailable until an adapter declares them)
+16. Evidence Graph (also the next scheduled full-project verification)
+17. Reliability Analysis (statistical, building on profiles and benchmarks)
+18. Experiment Planner
+19. Research validation
+20. Advanced UI/API
+21. Public release / reproducibility package

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from experionyx.artifacts import ArtifactStore
+from experionyx.calibration.entities import CalibrationAnalysis
 from experionyx.domain import Artifact, Run, RunStatus, to_jsonable
 from experionyx.drift.entities import DriftAnalysis
 from experionyx.errors import ExperionyxError, ProfileRefusal
@@ -289,6 +290,18 @@ def check_compatibility(
         ):
             if want != got:
                 issues.append(_issue("INCOMPATIBLE_STRESS_ANALYSIS", f"{label} {want}", f"{got}", f"the stress analysis was made over a different {label}", xid))  # fmt: skip
+    for cid in spec.calibration_analyses:
+        try:
+            ca = registry.get(CalibrationAnalysis, cid)
+        except ExperionyxError:
+            issues.append(_issue("CALIBRATION_ANALYSIS_MISSING", "a registered calibration analysis", cid, "it cannot be summarized", cid))  # fmt: skip
+            continue
+        for label, want, got in (
+            ("baseline run", spec.baseline_run, ca.baseline_run_id),
+            ("dataset fingerprint", ctx.dataset_fingerprint, ca.dataset_fingerprint),
+        ):
+            if want != got:
+                issues.append(_issue("INCOMPATIBLE_CALIBRATION_ANALYSIS", f"{label} {want}", f"{got}", f"the calibration analysis was made over a different {label}", cid))  # fmt: skip
     for did in spec.drift_analyses:
         try:
             da = registry.get(DriftAnalysis, did)
@@ -889,6 +902,36 @@ def _stress(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
     )
 
 
+def _calibration_analysis(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
+    """Calibration & uncertainty evidence as one dimension. Statuses, metrics and counts are copied
+    as recorded; missing or insufficient calibration evidence stays UNAVAILABLE or
+    INSUFFICIENT_EVIDENCE and is never read as good calibration. No score is formed."""
+    if not spec.calibration_analyses:
+        acc.dim(
+            Dimension.CALIBRATION_ANALYSIS,
+            DimensionStatus.UNAVAILABLE,
+            [],
+            reason="no calibration analysis was referenced by the profile; the absence of calibration evidence is not evidence of good calibration",
+        )
+        return
+    rows: list[dict[str, Any]] = []
+    for cid in spec.calibration_analyses:
+        ca = registry.get(CalibrationAnalysis, cid)
+        s = ca.summary
+        rows.append({"source": {"kind": "CALIBRATION_ANALYSIS", "id": cid, "spec_id": ca.spec_id, "provenance_fingerprint": ca.provenance_fingerprint}, "analysis_status": ca.analysis_status, "prediction_representation": s.get("prediction_representation"), "binning": to_jsonable(s.get("binning")), "baseline": to_jsonable(s.get("baseline")), "method": to_jsonable(s.get("method")), "contexts": to_jsonable(s.get("contexts")), "comparison_status_counts": to_jsonable(s.get("comparison_status_counts")), "data_quality": to_jsonable(s.get("data_quality")), "note": "calibration metrics copied as recorded; they depend on the binning and the sample, and no calibration or uncertainty score is formed"})  # fmt: skip
+        acc.ref(
+            Dimension.CALIBRATION_ANALYSIS, RefKind.CALIBRATION_ANALYSIS, cid, ca.analysis_status
+        )
+    derived = any((r["baseline"] or {}).get("status") == "COMPUTED" for r in rows)
+    acc.dim(
+        Dimension.CALIBRATION_ANALYSIS,
+        DimensionStatus.DERIVED if derived else DimensionStatus.INSUFFICIENT_EVIDENCE,
+        rows,
+        reason=None if derived else "no calibration analysis had enough usable observations",
+        note="calibration evidence is scoped to the stated model, data, binning and sample; it is not an uncertainty guarantee",
+    )
+
+
 def _drift(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
     """Distribution-shift evidence as one dimension. Statuses and counts are copied as recorded;
     nothing links a distribution change to any other dimension, and no score is formed."""
@@ -1078,6 +1121,16 @@ def provenance_fingerprint(
             ),
             **(
                 {
+                    "calibration_analyses": {
+                        c: registry.get(CalibrationAnalysis, c).provenance_fingerprint
+                        for c in spec.calibration_analyses
+                    }
+                }
+                if spec.calibration_analyses
+                else {}
+            ),
+            **(
+                {
                     "drift_analyses": {
                         d: registry.get(DriftAnalysis, d).provenance_fingerprint
                         for d in spec.drift_analyses
@@ -1111,6 +1164,7 @@ def build(registry: Registry, store: ArtifactStore, spec: ProfileSpec) -> Built:
     _slices(registry, spec, ctx, acc)
     _drift(registry, spec, acc)
     _stress(registry, spec, acc)
+    _calibration_analysis(registry, spec, acc)
     runs = [spec.baseline_run]
     for fid in spec.fault_experiments:
         runs += [

@@ -122,6 +122,20 @@ for missingness and validity rate differences between groups, and `adjust_pvalue
 family. Its own procedures are descriptive: Tukey/MAD outlier rules, population skewness and kurtosis,
 Pearson correlation and value purity as leakage *indicators*. None of them is a test or a verdict.
 
+## Reuse by calibration analysis (Phase 15)
+
+The calibration engine ([calibration.md](calibration.md)) uses the Phase 10 core for: Wilson intervals of
+accuracy and of each bin's observed rate (`proportion_interval`); paired or unpaired comparisons, effect sizes,
+permutation p-values and bootstrap intervals of the per-sample means (accuracy, mean confidence, top-label
+Brier and log loss) with `compare`; and the family corrections with `adjust_pvalues`, applied separately to each
+(comparison family, metric). ECE and MCE are not means of a per-sample value, so their differences use a
+seeded percentile bootstrap (resampling pairs when the sample IDs match, each group otherwise) and a
+permutation test (condition swap within pairs, or a re-split of the pooled sample) implemented beside the
+metrics. BCa is not offered for them (their resampling distribution is non-smooth). Bootstrap and Wilson
+intervals assume independent, identically distributed observations; ECE is positively biased in small
+samples and the percentile interval does not correct that. Significance (raw and adjusted p) is recorded
+separately from practical magnitude (`practical_delta`).
+
 ## Reuse by stress analysis (Phase 14)
 
 The stress engine ([stress.md](stress.md)) adds no inference of its own. Per trial it compares the

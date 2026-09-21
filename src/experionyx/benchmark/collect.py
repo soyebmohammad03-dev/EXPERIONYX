@@ -12,6 +12,7 @@ from experionyx.artifacts import ArtifactStore
 from experionyx.benchmark.protocol import Protocol, Unit
 from experionyx.benchmark.spec import ENGINE_VERSION, BenchmarkSpec
 from experionyx.benchmark.taxonomy import CoverageStatus, UnitKind, UnitStatus
+from experionyx.calibration.entities import CalibrationAnalysis
 from experionyx.domain import Run, RunStatus, to_jsonable
 from experionyx.drift.entities import DriftAnalysis
 from experionyx.errors import ExperionyxError
@@ -60,6 +61,7 @@ class Executed:
     slice_analysis: str | None = None
     drift_analysis: str | None = None
     stress_analysis: str | None = None
+    calibration_analysis: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +76,11 @@ class Executed:
             **({"slice_analysis": self.slice_analysis} if self.slice_analysis else {}),
             **({"drift_analysis": self.drift_analysis} if self.drift_analysis else {}),
             **({"stress_analysis": self.stress_analysis} if self.stress_analysis else {}),
+            **(
+                {"calibration_analysis": self.calibration_analysis}
+                if self.calibration_analysis
+                else {}
+            ),
         }
 
     @classmethod
@@ -90,6 +97,7 @@ class Executed:
             d.get("slice_analysis"),
             d.get("drift_analysis"),
             d.get("stress_analysis"),
+            d.get("calibration_analysis"),
         )
 
 
@@ -535,6 +543,24 @@ def collect(
         else:
             reasons.append("the requested stress analysis did not run")
 
+    # -- calibration analysis (only when the benchmark explicitly requested one) ----------------------------------------------------------------
+    cal_block: dict[str, Any] = {"status": DimensionStatus.UNAVAILABLE.value, "reason": "no calibration analysis was requested by this benchmark"}  # fmt: skip
+    cal_fp: str | None = None
+    if spec.calibration is not None:
+        planned = 1 + (spec.calibration.method != "NONE") + len(spec.calibration.slices) + (len(spec.calibration.windows.windows) if spec.calibration.windows else 0)  # fmt: skip
+        cal_block = {"status": DimensionStatus.UNAVAILABLE.value, "planned": planned, "coverage": {"planned": planned, "executed": 0, "unavailable": 0, "insufficient_evidence": 0, "failed": planned}, "reason": ex.errors.get("calibration", "the calibration analysis did not run")}  # fmt: skip
+        if ex.calibration_analysis:
+            ca = registry.get(CalibrationAnalysis, ex.calibration_analysis)
+            cal_fp = ca.provenance_fingerprint
+            ctxs = to_jsonable(ca.summary.get("contexts")) or {}
+            cnt = _count(c["status"] for c in ctxs.values())  # type: ignore[attr-defined]
+            cov = {"planned": planned, "executed": cnt.get("COMPUTED", 0), "unavailable": cnt.get("UNAVAILABLE", 0), "insufficient_evidence": cnt.get("INSUFFICIENT_EVIDENCE", 0), "failed": 0}  # fmt: skip
+            cal_block = {"status": DimensionStatus.DERIVED.value if cov["executed"] else DimensionStatus.INSUFFICIENT_EVIDENCE.value, "analysis_id": ca.id, "analysis_status": ca.analysis_status, "planned": planned, "coverage": cov, "context_status_counts": cnt, "comparison_status_counts": to_jsonable(ca.summary.get("comparison_status_counts")), "source": {"kind": "CALIBRATION_ANALYSIS", "id": ca.id}, "note": "the calibration analysis is referenced, not duplicated: planned, executed, unavailable, insufficient-evidence and failed contexts are counted in its coverage"}  # fmt: skip
+            if ca.analysis_status != "COMPLETE":
+                reasons.append("the calibration analysis has unavailable, insufficient-evidence or invalid-data contexts")  # fmt: skip
+        else:
+            reasons.append("the requested calibration analysis did not run")
+
     # -- coverage ---------------------------------------------------------------------------------------------------------------------------------
     trials = {s.value: sum(u["status"] == s.value for u in fault_units) for s in UnitStatus}
     pts_total = sum(f.get("points_requested", 0) for f in fam.values())
@@ -611,6 +637,7 @@ def collect(
         **({"slice_analysis": slice_block["status"]} if spec.slices else {}),
         **({"drift_analysis": drift_block["status"]} if spec.drift is not None else {}),
         **({"stress_analysis": stress_block["status"]} if spec.stress is not None else {}),
+        **({"calibration_analysis": cal_block["status"]} if spec.calibration is not None else {}),
         "uncertainty": DimensionStatus.DERIVED.value if intervals else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "reproducibility": DimensionStatus.DERIVED.value if responses else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
     }  # fmt: skip
@@ -622,6 +649,7 @@ def collect(
         **({"slice_analysis": slice_block} if spec.slices else {}),
         **({"drift_analysis": drift_block} if spec.drift is not None else {}),
         **({"stress_analysis": stress_block} if spec.stress is not None else {}),
+        **({"calibration_analysis": cal_block} if spec.calibration is not None else {}),
         "uncertainty": {"status": section["uncertainty"], "intervals_available": intervals, "caveats": ["intervals are descriptive spreads under each analysis's own method and are not comparable across methods", *sorted({w for r in inter for w in ((r.get("bootstrap") or {}).get("warnings") or [])})]},
         "reproducibility": {"status": section["reproducibility"], "trials_per_family": {k: {"requested": f.get("trials_requested"), "completed": f.get("completed")} for k, f in fam.items() if "trials_requested" in f}, "distinct_seeds": len(spec.seeds), "interactions_by_lifecycle_state": _count(r.get("lifecycle_state") for r in inter if r.get("lifecycle_state")), "unresolved": list(reasons), "replay": "the collect Run can be replayed (`benchmark replay`); re-executing the whole protocol in another registry is the reproduction test"},
     }  # fmt: skip
@@ -643,6 +671,7 @@ def collect(
             **({"slice_analysis": slice_fp} if spec.slices else {}),
             **({"drift_analysis": drift_fp} if spec.drift is not None else {}),
             **({"stress_analysis": stress_fp} if spec.stress is not None else {}),
+            **({"calibration_analysis": cal_fp} if spec.calibration is not None else {}),
         }
     )
     summary = {

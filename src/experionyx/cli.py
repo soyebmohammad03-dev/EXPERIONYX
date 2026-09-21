@@ -22,6 +22,10 @@ from experionyx.benchmark.entities import Benchmark, BenchmarkResult
 from experionyx.benchmark.protocol import validation_report as benchmark_validation
 from experionyx.benchmark.registry import BenchmarkRegistry
 from experionyx.benchmark.spec import BenchmarkSpec
+from experionyx.calibration import engine as calibration_engine
+from experionyx.calibration.entities import CalibrationAnalysis, CalibrationResult
+from experionyx.calibration.registry import CalibrationRegistry
+from experionyx.calibration.spec import CalibrationSpec
 from experionyx.data_quality import engine as quality_engine
 from experionyx.data_quality.entities import QualityAnalysis, QualityCheck
 from experionyx.data_quality.registry import QualityRegistry
@@ -2369,6 +2373,115 @@ def _cmd_stress_replay(args: argparse.Namespace) -> int:
     return 0 if out["deterministic"] else 1
 
 
+# -- calibration & uncertainty ---------------------------------------------------------------------------------
+
+
+def _calibration_spec(path: str) -> CalibrationSpec:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read calibration spec {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExperionyxError("a calibration spec file must be a JSON object")
+    return CalibrationSpec.from_dict(doc)
+
+
+def _cbstore(args: argparse.Namespace) -> LocalArtifactStore:
+    return LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+
+
+def _calibration_row(a: CalibrationAnalysis) -> dict[str, object]:
+    s = a.summary
+    method = s.get("method")
+    return {"id": a.id, "status": a.analysis_status, "spec_id": a.spec_id, "baseline_run_id": a.baseline_run_id, "dataset_fingerprint": a.dataset_fingerprint, "provenance_fingerprint": a.provenance_fingerprint, "prediction_representation": s.get("prediction_representation"), "binning": to_jsonable(s.get("binning")), "method": method.get("method") if isinstance(method, Mapping) else None, "baseline": to_jsonable(s.get("baseline"))}  # fmt: skip
+
+
+def _calibration_result_row(r: CalibrationResult) -> dict[str, object]:
+    return {"id": r.id, "context_key": r.context_key, "context_kind": r.context_kind, "status": r.status, "n_samples": r.n_samples, "reason": r.reason, "headline": to_jsonable(r.headline), "sample_digest": r.sample_digest}  # fmt: skip
+
+
+def _cmd_calibration_validate(args: argparse.Namespace) -> int:
+    spec = _calibration_spec(args.spec)
+    out: dict[str, object] = {"valid": True, "spec_id": spec.spec_id, "baseline_run": spec.baseline_run, "prediction_source": spec.prediction_source, "objects": list(spec.objects), "binning": spec.binning.to_dict(), "method": spec.method, "slices": {s.name: s.slice_id for s in spec.slices}, "windows": [w.name for w in spec.windows.windows] if spec.windows else [], "stress_analyses": list(spec.stress_analyses)}  # fmt: skip
+    if args.preflight:
+        with _open(args.workspace) as reg:
+            base = calibration_engine.validate(reg, _cbstore(args), spec)
+            out["preflight"] = {"baseline_usable": len(base.obs), "baseline_rows": base.n_rows, "invalid_rows": len(base.invalid), "duplicate_ids": len(base.duplicates), "prediction_representation": base.representation, "classes": list(base.classes)}  # fmt: skip
+    _emit(out, f"VALID: {spec.spec_id}", args)
+    return 0
+
+
+def _cmd_calibration_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        cols = {k: v for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status)) if v}  # fmt: skip
+        rows = [
+            _calibration_row(a) for a in CalibrationRegistry(reg, _cbstore(args)).analyses(**cols)
+        ]
+    _emit({"analyses": rows}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in rows), args)  # fmt: skip
+    return 0
+
+
+def _cmd_calibration_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        cr = CalibrationRegistry(reg, _cbstore(args))
+        if args.id.startswith("cbr_"):
+            r = reg.get(CalibrationResult, args.id)
+            doc: dict[str, object] = {**_calibration_result_row(r), "analysis_id": r.analysis_id}
+        else:
+            a = cr.analysis(args.id)
+            doc = {**_calibration_row(a), "summary": to_jsonable(a.summary), "provenance": cr.provenance(a.id), "results": [_calibration_result_row(r) for r in cr.results(a.id)], "artifacts": [{"path": x.path, "id": x.id} for x in cr.artifacts(a.id)]}  # fmt: skip
+            if args.document:
+                doc["document"] = cr.document(a.id, args.document)
+            if args.full:
+                doc["documents"] = {n: cr.document(a.id, n) for n in calibration_engine.DOCUMENTS}
+    _emit(doc, f"{args.id}: {doc.get('status')}", args)
+    return 0
+
+
+def _cmd_calibration_evaluate(args: argparse.Namespace) -> int:
+    spec = _calibration_spec(args.spec)
+    with _open(args.workspace) as reg:
+        inv = args.investigation or reg.get(Experiment, reg.get(Run, spec.baseline_run).experiment_id).investigation_id  # fmt: skip
+        out = calibration_engine.run_calibration_request(reg, _cbstore(args), _executor(reg, args.workspace), inv, spec)  # fmt: skip
+        a = reg.get(CalibrationAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
+
+
+def _cmd_calibration_compare(args: argparse.Namespace) -> int:
+    """Recompute the analysis from the stored predictions and compare with the stored documents; nothing is stored."""
+    with _open(args.workspace) as reg:
+        store = _cbstore(args)
+        cr = CalibrationRegistry(reg, store)
+        a = cr.analysis(args.id)
+        spec = CalibrationSpec.from_dict(a.spec)
+        dataset = None
+        try:
+            from experionyx.slices.data import dataset_for_run
+
+            dataset = dataset_for_run(reg, default_registries(entry_points=True), Path(args.workspace), a.baseline_run_id)  # fmt: skip
+        except ExperionyxError:
+            dataset = None
+        c = calibration_engine.compute(reg, store, spec, dataset)
+        stored = {n: cr.document(a.id, n) for n in calibration_engine.DOCUMENTS[1:]}
+    from experionyx.interactions.lifecycle import _compare as compare_docs
+
+    diffs: list[str] = []
+    for name, doc in c.docs.items():
+        compare_docs(name, stored[name], json.loads(json.dumps(to_jsonable(doc))), diffs)
+    out = {"analysis_id": a.id, "reproduced": not diffs, "differences": diffs[:50], "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint}, "not_stored": "nothing was stored; `calibration replay` re-executes the analysis run"}  # fmt: skip
+    _emit(out, f"{'reproduced' if not diffs else 'DIFFERS'}: {a.id}", args)
+    return 0 if not diffs else 1
+
+
+def _cmd_calibration_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = calibration_engine.replay_check(reg, _cbstore(args), _executor(reg, args.workspace), args.id)  # fmt: skip
+    _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
+    return 0 if out["deterministic"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -3127,6 +3240,40 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-trials", action="store_true", help="replay only the analysis run")
     slfmt(p)
     p.set_defaults(func=_cmd_stress_replay)
+
+    cb = group(
+        "calibration",
+        "calibration and uncertainty of stored predictions (confidence is not automatically uncertainty; no universal score)",
+    )
+    p = cb.add_parser("validate", help="parse a calibration spec; prints its identity (--preflight refuses unsupported baselines before anything runs)")  # fmt: skip
+    p.add_argument("spec")
+    p.add_argument("--preflight", action="store_true", help="also check the baseline run's stored predictions and the referenced analyses")  # fmt: skip
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_validate)
+    p = cb.add_parser("list", help="list calibration analyses")
+    p.add_argument("--baseline-run")
+    p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_list)
+    p = cb.add_parser("inspect", help="a calibration analysis (cba_) with provenance, evidence and artifacts, or one context result (cbr_)")  # fmt: skip
+    p.add_argument("id")
+    p.add_argument("--document", choices=list(calibration_engine.DOCUMENTS), help="include one stored document (evidence)")  # fmt: skip
+    p.add_argument("--full", action="store_true", help="include every stored document")
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_inspect)
+    p = cb.add_parser("evaluate", help="run a calibration analysis as a new run; exit 3 if some evidence is insufficient, unavailable or invalid")  # fmt: skip
+    p.add_argument("spec")
+    p.add_argument("--investigation", help="investigation ID (default: the baseline run's)")
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_evaluate)
+    p = cb.add_parser("compare", help="recompute an analysis from the stored predictions and compare it with the stored documents; nothing is stored")  # fmt: skip
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_compare)
+    p = cb.add_parser("replay", help="replay the analysis as a NEW run and compare every document; exit 1 on any difference")  # fmt: skip
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_calibration_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

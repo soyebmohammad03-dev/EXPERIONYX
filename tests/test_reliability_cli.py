@@ -89,7 +89,7 @@ def test_profile_list_inspect_evidence_compare_replay(
     full_doc = json.loads(cli(w, capsys, "reliability", "inspect", pid, "--full")[1])["document"]
     assert (
         set(full_doc["dimensions"]) == set(full_doc["dimension_status"])
-        and len(full_doc["dimensions"]) == 12
+        and len(full_doc["dimensions"]) == 13
     )
     dim = json.loads(
         cli(w, capsys, "reliability", "inspect", pid, "--dimension", "FAULT_SENSITIVITY")[1]

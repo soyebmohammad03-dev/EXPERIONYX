@@ -31,6 +31,28 @@ class Frame:
     columns: dict[str, dict[int, Any]]  # declared feature name -> {sample index: raw cell}
 
 
+def order_keys(
+    ids: list[int], ordering: str, raw: dict[int, Any]
+) -> tuple[dict[int, float], dict[str, list[int]]]:
+    """(sample index -> ordering key, reason -> excluded sample indices) from the ordering column."""
+    order: dict[int, float] = {}
+    excluded: dict[str, list[int]] = {"MISSING": [], "NON_FINITE": [], "INVALID": []}
+    for i in ids:
+        if ordering == INDEX:
+            order[i] = float(i)
+            continue
+        x = raw.get(i)
+        if x is None or (isinstance(x, float) and math.isnan(x)):
+            excluded["MISSING"].append(i)
+        elif isinstance(x, bool) or not isinstance(x, int | float):
+            excluded["INVALID"].append(i)
+        elif not math.isfinite(x):
+            excluded["NON_FINITE"].append(i)
+        else:
+            order[i] = float(x)
+    return order, excluded
+
+
 def load_frame(base: Baseline, dataset: DatasetAdapter | None, spec: ShiftSpec) -> Frame:
     ordering = spec.ordering.field
     wanted = [f.column for f in spec.features] + ([] if ordering == INDEX else [ordering])
@@ -41,21 +63,7 @@ def load_frame(base: Baseline, dataset: DatasetAdapter | None, spec: ShiftSpec) 
                 f"fields {sorted(wanted)} need the dataset, which is not available"
             )
         raw = feature_columns(dataset, base.split, wanted, set(base.rows), raw=True)
-    order: dict[int, float] = {}
-    excluded: dict[str, list[int]] = {"MISSING": [], "NON_FINITE": [], "INVALID": []}
-    for i in sorted(base.rows):
-        if ordering == INDEX:
-            order[i] = float(i)
-            continue
-        x = raw[ordering].get(i)
-        if x is None or (isinstance(x, float) and math.isnan(x)):
-            excluded["MISSING"].append(i)
-        elif isinstance(x, bool) or not isinstance(x, int | float):
-            excluded["INVALID"].append(i)
-        elif not math.isfinite(x):
-            excluded["NON_FINITE"].append(i)
-        else:
-            order[i] = float(x)
+    order, excluded = order_keys(sorted(base.rows), ordering, raw.get(ordering, {}))
     if spec.ordering.unique:
         dupes = sorted(k for k, n in Counter(order.values()).items() if n > 1)
         if dupes:

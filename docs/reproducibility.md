@@ -48,6 +48,16 @@ as a new run and compares all five stored documents; a document that no longer m
 refused, not reported as a difference. Permutation tests and bootstraps are seeded and do not depend on
 row or column order.
 
+## Calibration analyses (Phase 15)
+
+A calibration analysis is a Run over digest-verified stored predictions; it never loads or calls the model.
+Every bootstrap and permutation uses its recorded seed, the calibration split is a seeded hash of the sample
+ID (independent of row order), and both Platt (Newton iterations from a fixed start) and isotonic (pool
+adjacent violators) fitting are deterministic, so the same stored data and spec reproduce identity, bins,
+metrics, intervals, comparisons and candidate signals exactly (floats within `REPLAY_TOLERANCE`).
+`experionyx calibration replay` re-executes the run and compares all eight documents; `calibration compare`
+recomputes from the stored predictions and stores nothing. See [calibration.md](calibration.md).
+
 ## Stress analyses (Phase 14)
 
 A stress analysis is a Run, and so is every trial. Its provenance fingerprint covers the whole design,

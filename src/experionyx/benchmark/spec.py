@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Self
 
 import experionyx.validation as v
+from experionyx.calibration.spec import CalibrationSpec
 from experionyx.domain import to_jsonable
 from experionyx.drift.spec import ShiftSpec
 from experionyx.errors import ValidationError
@@ -231,6 +232,9 @@ class BenchmarkSpec:
     stress: StressPlan | None = (
         None  # explicit request for a Phase 14 stress analysis on the benchmark's model, dataset, evaluation and baseline
     )
+    calibration: CalibrationSpec | None = (
+        None  # explicit request for a Phase 15 calibration analysis of the benchmark's baseline; its baseline_run is a placeholder here
+    )
     drift: ShiftSpec | None = (
         None  # explicit request for a Phase 12 drift analysis; its baseline_run is a placeholder here and is replaced by the benchmark's baseline
     )
@@ -302,6 +306,10 @@ class BenchmarkSpec:
             self.drift is not None
         ):  # explicit request only; keeps every earlier benchmark's identity
             d["drift"] = {k: x for k, x in self.drift.to_dict().items() if k != "baseline_run"}
+        if (
+            self.calibration is not None
+        ):  # explicit request only; keeps every earlier benchmark's identity
+            d["calibration"] = {k: x for k, x in self.calibration.to_dict().items() if k != "baseline_run"}  # fmt: skip
         return d
 
     @property
@@ -335,6 +343,7 @@ class BenchmarkSpec:
             "slices",
             "slice_config",
             "drift",
+            "calibration",
             "stress",
         }
         extra = set(d) - known
@@ -362,5 +371,6 @@ class BenchmarkSpec:
             tuple(SliceSpec.from_dict(x) for x in d.get("slices", [])),
             SliceConfig.from_dict(d["slice_config"]) if d.get("slice_config") else SliceConfig(),
             StressPlan.from_dict(d["stress"]) if d.get("stress") else None,
+            CalibrationSpec.from_dict({**d["calibration"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("calibration") else None,
             ShiftSpec.from_dict({**d["drift"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("drift") else None,
         )  # fmt: skip

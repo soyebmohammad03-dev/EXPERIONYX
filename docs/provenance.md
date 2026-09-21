@@ -59,6 +59,17 @@ Provenance describes what was *recorded*; it does not prove the recorded source 
 dirty tree is flagged, its diff is not stored), nor capture system libraries, hardware
 accelerators, or data contents.
 
+## Calibration analyses (Phase 15)
+
+Every calibration analysis is a Run with its own Provenance record (source revision, environment,
+dependency digest). Its `calibration/spec.json` records the model and dataset fingerprints, the split, the
+evaluation-config hash, the declared and verified prediction representation (and the softmax assumption when
+the scores were derived from logits), the target representation and class order, the binning, the
+calibration method with its calibration/evaluation split or run (data identities, digests, parameters), the
+bootstrap configuration and seeds, the slice / window context, the stress trials analyzed (analysis, trial and
+run IDs, seeds, predictions digests) and the referenced data-quality analyses. The provenance fingerprint
+changes with any of them and with the stored predictions. See [calibration.md](calibration.md).
+
 ## Stress trials (Phase 14)
 
 Every stress trial is a Run with its own Provenance record (source revision, environment, dependency

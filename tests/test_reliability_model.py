@@ -39,6 +39,7 @@ def test_vocabulary_has_the_required_dimensions_statuses_and_scopes_and_no_cross
         "SLICE_SENSITIVITY",
         "DISTRIBUTION_SHIFT",
         "MODEL_STRESS",
+        "CALIBRATION_ANALYSIS",
         "REPRODUCIBILITY",
         "UNCERTAINTY",
         "LATENCY",

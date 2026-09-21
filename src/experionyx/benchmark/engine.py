@@ -17,6 +17,7 @@ from experionyx.benchmark.entities import Benchmark, BenchmarkResult, BenchmarkU
 from experionyx.benchmark.protocol import base_fault, design_for, expand, pair_bases
 from experionyx.benchmark.spec import ENGINE_VERSION, BenchmarkSpec
 from experionyx.benchmark.taxonomy import CoverageStatus, UnitKind, UnitStatus
+from experionyx.calibration.engine import run_calibration_request
 from experionyx.domain import (
     Artifact,
     ClaimStatus,
@@ -265,6 +266,15 @@ def run_benchmark(
                 errors["stress"] = f"the stress analysis run ended {sr.status.value}"
         except (ExperionyxError, ValueError) as exc:
             errors["stress"] = f"{type(exc).__name__}: {exc}"
+    calibration_analysis_id: str | None = None
+    if spec.calibration is not None:
+        try:
+            co = run_calibration_request(registry, store, executor, inv, dataclasses.replace(spec.calibration, baseline_run=baseline))  # fmt: skip
+            calibration_analysis_id = co.analysis_id
+            if calibration_analysis_id is None:
+                errors["calibration"] = f"the calibration analysis run ended {co.status.value}"
+        except (ExperionyxError, ValueError) as exc:
+            errors["calibration"] = f"{type(exc).__name__}: {exc}"
     profile_id: str | None = None
     if spec.profile:
         try:
@@ -282,6 +292,7 @@ def run_benchmark(
                     (slice_analysis_id,) if slice_analysis_id else (),
                     (drift_analysis_id,) if drift_analysis_id else (),
                     (stress_analysis_id,) if stress_analysis_id else (),
+                    (calibration_analysis_id,) if calibration_analysis_id else (),
                 ),
             )
             profile_id = pr.profile_id
@@ -301,6 +312,7 @@ def run_benchmark(
         slice_analysis_id,
         drift_analysis_id,
         stress_analysis_id,
+        calibration_analysis_id,
     )
     conf = ConfigurationRef(
         {

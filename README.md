@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 14 (model stress laboratory).** The typed domain model, a local SQLite registry,
+> **Status: Phase 15 (calibration & uncertainty laboratory).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -106,6 +106,12 @@ See [docs/architecture.md](docs/architecture.md) and
   Laboratory), parameters, decision thresholds and evaluation conditions, expanded into explicit
   replayable trials against a validated baseline, with paired Phase 10 statistics, slices, failure
   discovery and interaction analysis. No robustness score, no causal claim.
+- Calibration & uncertainty laboratory ([docs/calibration.md](docs/calibration.md)): whether a model's
+  probabilities correspond to observed correctness (top-label and classwise reliability, ECE/MCE, Brier,
+  log loss), post-hoc Platt/isotonic calibration with a strict calibration/evaluation separation,
+  statistical uncertainty of the metrics (Wilson and seeded bootstrap), descriptive predictive dispersion,
+  and explicit slice, window and stress contexts, all replayable. Confidence is not automatically
+  uncertainty; unsupported uncertainty is reported unavailable; no universal calibration or uncertainty score.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

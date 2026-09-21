@@ -56,6 +56,13 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     leakage indicators are not proof, missingness can be informative and class imbalance is
     context-dependent ([data-quality.md](data-quality.md)).
 
+18. **Confidence is not uncertainty, and calibration is not a score.** A model's probability is
+    compared with observed correctness on stored predictions, separately for the top label, each class
+    and the whole vector; ECE depends on the binning and the sample; post-hoc calibration is fitted only
+    on data disjoint from what it is evaluated on; predictive uncertainty is reported only where the model
+    supports it and is otherwise `UNAVAILABLE`; no universal calibration or uncertainty score exists
+    ([calibration.md](calibration.md)).
+
 17. **A stress is an experiment, not a score.** A stress trial deliberately changes one recorded thing,
     is compared with a validated baseline, keeps raw values, direction-aware deterioration and paired
     statistics, and never yields a robustness score or a causal claim; a lack of stress evidence is
