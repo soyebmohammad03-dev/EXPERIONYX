@@ -16,6 +16,9 @@ class Dimension(StrEnum):
     CALIBRATION_ANALYSIS = (
         "CALIBRATION_ANALYSIS"  # Phase 15 laboratory; CALIBRATION is the baseline's own
     )
+    RESOURCE_SYSTEM = (
+        "RESOURCE_SYSTEM"  # Phase 16 laboratory; LATENCY is the baseline's own single timing
+    )
     REPRODUCIBILITY = "REPRODUCIBILITY"
     UNCERTAINTY = "UNCERTAINTY"
     LATENCY = "LATENCY"
@@ -53,3 +56,4 @@ class RefKind(StrEnum):
     DRIFT_ANALYSIS = "DRIFT_ANALYSIS"
     STRESS_ANALYSIS = "STRESS_ANALYSIS"
     CALIBRATION_ANALYSIS = "CALIBRATION_ANALYSIS"
+    RESOURCE_ANALYSIS = "RESOURCE_ANALYSIS"

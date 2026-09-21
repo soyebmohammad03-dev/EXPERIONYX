@@ -48,6 +48,17 @@ as a new run and compares all five stored documents; a document that no longer m
 refused, not reported as a difference. Permutation tests and bootstraps are seeded and do not depend on
 row or column order.
 
+## Resource analyses (Phase 16)
+
+Resource timing is **not** reproducible bit for bit and is never promised to be: it depends on the machine, the
+clock, the scheduler, thermal state and other load. What reproduces is the **definition** (`spec.json`, exactly)
+and, where the model is deterministic, the **model outputs** (a digest over the per-sample outputs, independent of
+batching). `experionyx resources replay` re-executes the Run as a new Run and compares those two things; the
+median trial time of both runs is shown for information only. A repeated measurement of one definition in one
+environment is a new analysis with the same provenance fingerprint. Comparing measurements from different
+environments is refused unless explicitly allowed and is then labelled as confounded. See
+[resources.md](resources.md).
+
 ## Calibration analyses (Phase 15)
 
 A calibration analysis is a Run over digest-verified stored predictions; it never loads or calls the model.

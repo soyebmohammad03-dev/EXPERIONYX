@@ -105,6 +105,7 @@ class TorchModelAdapter(BaseModelAdapter):
     NAME: ClassVar[str] = "torch"
     VERSION: ClassVar[str] = ADAPTER_VERSION
     FRAMEWORK: ClassVar[str] = "pytorch"
+    THREAD_SAFE_INFERENCE: ClassVar[bool] = True  # eval() + no_grad: read-only
     POSSIBLE_CAPABILITIES: ClassVar[frozenset[ModelCapability]] = frozenset(
         {ModelCapability.PREDICT, ModelCapability.BATCH_PREDICT}
     )

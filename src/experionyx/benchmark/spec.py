@@ -17,6 +17,7 @@ from experionyx.errors import ValidationError
 from experionyx.evaluation.config import EvaluationConfig
 from experionyx.hashing import HASH_PREFIX, content_hash
 from experionyx.interactions.config import InteractionConfig
+from experionyx.resources.spec import ResourceSpec
 from experionyx.slices.analysis import SliceConfig
 from experionyx.slices.spec import SliceSpec
 from experionyx.stress.spec import StressPlan
@@ -238,6 +239,9 @@ class BenchmarkSpec:
     drift: ShiftSpec | None = (
         None  # explicit request for a Phase 12 drift analysis; its baseline_run is a placeholder here and is replaced by the benchmark's baseline
     )
+    resources: tuple[
+        ResourceSpec, ...
+    ] = ()  # explicit request for Phase 16 resource measurements (one unit each; a batch-size sweep is several specs) over the benchmark's model and dataset
 
     def __post_init__(self) -> None:
         if self.schema_version != SPEC_SCHEMA_VERSION:
@@ -249,6 +253,16 @@ class BenchmarkSpec:
             )
         v.ref("model", self.model, "mdl")
         v.ref("dataset", self.dataset, "dst")
+        ids = [r.spec_id for r in self.resources]
+        if len(set(ids)) != len(ids):
+            raise ValidationError("resource specs must be distinct")
+        if any(r.model_id != self.model or r.dataset_id != self.dataset for r in self.resources):
+            raise ValidationError(
+                "every resource spec must measure the benchmark's own model and dataset"
+            )
+        object.__setattr__(
+            self, "resources", tuple(sorted(self.resources, key=lambda r: r.spec_id))
+        )
         if not self.faults:
             raise ValidationError("a benchmark needs at least one fault grid")
         names = [g.name for g in self.faults]
@@ -310,6 +324,8 @@ class BenchmarkSpec:
             self.calibration is not None
         ):  # explicit request only; keeps every earlier benchmark's identity
             d["calibration"] = {k: x for k, x in self.calibration.to_dict().items() if k != "baseline_run"}  # fmt: skip
+        if self.resources:  # explicit request only; keeps every earlier benchmark's identity
+            d["resources"] = [r.to_dict() for r in self.resources]
         return d
 
     @property
@@ -344,6 +360,7 @@ class BenchmarkSpec:
             "slice_config",
             "drift",
             "calibration",
+            "resources",
             "stress",
         }
         extra = set(d) - known
@@ -373,4 +390,5 @@ class BenchmarkSpec:
             StressPlan.from_dict(d["stress"]) if d.get("stress") else None,
             CalibrationSpec.from_dict({**d["calibration"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("calibration") else None,
             ShiftSpec.from_dict({**d["drift"], "baseline_run": DRIFT_PLACEHOLDER_RUN}) if d.get("drift") else None,
+            tuple(ResourceSpec.from_dict(x) for x in d.get("resources", [])),
         )  # fmt: skip

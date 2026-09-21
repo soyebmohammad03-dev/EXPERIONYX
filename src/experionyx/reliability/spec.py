@@ -32,6 +32,7 @@ class ProfileSpec:
     drift_analyses: tuple[str, ...] = ()  # dan_ IDs; omitted from the identity when empty
     stress_analyses: tuple[str, ...] = ()  # sxa_ IDs; omitted from the identity when empty
     calibration_analyses: tuple[str, ...] = ()  # cba_ IDs; omitted from the identity when empty
+    resource_analyses: tuple[str, ...] = ()  # rsa_ IDs; omitted from the identity when empty
 
     def __post_init__(self) -> None:
         v.member("scope", self.scope, Scope)
@@ -55,6 +56,9 @@ class ProfileSpec:
             "calibration_analyses",
             _ids("calibration_analyses", self.calibration_analyses, "cba"),
         )
+        object.__setattr__(
+            self, "resource_analyses", _ids("resource_analyses", self.resource_analyses, "rsa")
+        )
 
     def to_dict(self) -> dict[str, object]:
         d: dict[str, object] = {
@@ -73,6 +77,8 @@ class ProfileSpec:
             d["stress_analyses"] = list(self.stress_analyses)
         if self.calibration_analyses:  # keeps the identity of every earlier profile unchanged
             d["calibration_analyses"] = list(self.calibration_analyses)
+        if self.resource_analyses:  # keeps the identity of every earlier profile unchanged
+            d["resource_analyses"] = list(self.resource_analyses)
         return d
 
     @property
@@ -91,6 +97,7 @@ class ProfileSpec:
             "drift_analyses",
             "stress_analyses",
             "calibration_analyses",
+            "resource_analyses",
             "profile_version",
         }
         if extra or "scope" not in d or "baseline_run" not in d:
@@ -120,4 +127,5 @@ class ProfileSpec:
             ids("drift_analyses"),
             ids("stress_analyses"),
             ids("calibration_analyses"),
+            ids("resource_analyses"),
         )

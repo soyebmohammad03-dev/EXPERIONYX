@@ -27,6 +27,7 @@ from experionyx.provenance import Provenance
 from experionyx.registry import Registry
 from experionyx.reliability.spec import PROFILE_VERSION, ProfileSpec
 from experionyx.reliability.taxonomy import Dimension, DimensionStatus, RefKind, Scope
+from experionyx.resources.entities import ResourceAnalysis
 from experionyx.slices.entities import SliceAnalysis
 from experionyx.stress.entities import StressAnalysis
 
@@ -302,6 +303,26 @@ def check_compatibility(
         ):
             if want != got:
                 issues.append(_issue("INCOMPATIBLE_CALIBRATION_ANALYSIS", f"{label} {want}", f"{got}", f"the calibration analysis was made over a different {label}", cid))  # fmt: skip
+    for rid in spec.resource_analyses:
+        try:
+            ra = registry.get(ResourceAnalysis, rid)
+        except ExperionyxError:
+            issues.append(_issue("RESOURCE_ANALYSIS_MISSING", "a registered resource analysis", rid, "it cannot be summarized", rid))  # fmt: skip
+            continue
+        for label, want, got in (
+            (
+                "model fingerprint",
+                ctx.model_fingerprint,
+                _sub(ra.summary, "model", "fingerprint"),
+            ),
+            (
+                "dataset fingerprint",
+                ctx.dataset_fingerprint,
+                _sub(ra.summary, "dataset", "fingerprint"),
+            ),
+        ):
+            if want != got:
+                issues.append(_issue("INCOMPATIBLE_RESOURCE_ANALYSIS", f"{label} {want}", f"{got}", f"the resource analysis was made over a different {label}", rid))  # fmt: skip
     for did in spec.drift_analyses:
         try:
             da = registry.get(DriftAnalysis, did)
@@ -932,6 +953,44 @@ def _calibration_analysis(registry: Registry, spec: ProfileSpec, acc: _Acc) -> N
     )
 
 
+def _sub(x: Mapping[str, Any], key: str, name: str | None = None) -> Any:
+    """`x[key][name]` (or `x[key]` as a mapping) when present, else None (or {})."""
+    d = x.get(key)
+    if name is None:
+        return d if isinstance(d, Mapping) else {}
+    return d.get(name) if isinstance(d, Mapping) else None
+
+
+def _resource_system(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
+    """Resource & systems evidence as one dimension: latency, throughput, timeout/failure, memory and
+    environment observations are copied as recorded, with the environment they were measured in. They
+    are environment-specific engineering measurements and are never read as a reliability verdict or
+    combined into a score. Missing evidence stays UNAVAILABLE; too few trials stays INSUFFICIENT_EVIDENCE."""
+    if not spec.resource_analyses:
+        acc.dim(
+            Dimension.RESOURCE_SYSTEM,
+            DimensionStatus.UNAVAILABLE,
+            [],
+            reason="no resource analysis was referenced by the profile; the absence of resource measurements is not evidence of good or bad system behaviour",
+        )
+        return
+    rows: list[dict[str, Any]] = []
+    for rid in spec.resource_analyses:
+        ra = registry.get(ResourceAnalysis, rid)
+        s: Any = to_jsonable(ra.summary)
+        ss = _sub(s, "steady_state")
+        rows.append({"source": {"kind": "RESOURCE_ANALYSIS", "id": rid, "spec_id": ra.spec_id, "provenance_fingerprint": ra.provenance_fingerprint}, "analysis_status": ra.analysis_status, "evidence_status": s.get("evidence_status"), "workload": s.get("workload"), "batch_size": s.get("batch_size"), "concurrency": s.get("concurrency"), "trials": s.get("trials"), "initialization": s.get("initialization"), "warmup": s.get("warmup"), "latency": {"trial_seconds": ss.get("trial_seconds"), "batch_seconds": ss.get("batch_seconds"), "per_sample_seconds": ss.get("per_sample_seconds")}, "throughput": ss.get("throughput_samples_per_second"), "failures": s.get("failures"), "cpu": s.get("cpu"), "memory": s.get("memory"), "outputs": s.get("outputs"), "environment": s.get("environment"), "note": "measurements copied as recorded; environment-specific engineering measurements, not a hardware benchmark, and no resource or reliability score is formed"})  # fmt: skip
+        acc.ref(Dimension.RESOURCE_SYSTEM, RefKind.RESOURCE_ANALYSIS, rid, ra.analysis_status)
+    measured = any(r["evidence_status"] == "MEASURED" for r in rows)
+    acc.dim(
+        Dimension.RESOURCE_SYSTEM,
+        DimensionStatus.DERIVED if measured else DimensionStatus.INSUFFICIENT_EVIDENCE,
+        rows,
+        reason=None if measured else "no resource analysis had enough completed measured trials",
+        note="resource behaviour is scoped to the stated machine, environment, workload and configuration; performance measurement is not reliability",
+    )
+
+
 def _drift(registry: Registry, spec: ProfileSpec, acc: _Acc) -> None:
     """Distribution-shift evidence as one dimension. Statuses and counts are copied as recorded;
     nothing links a distribution change to any other dimension, and no score is formed."""
@@ -1131,6 +1190,16 @@ def provenance_fingerprint(
             ),
             **(
                 {
+                    "resource_analyses": {
+                        r: registry.get(ResourceAnalysis, r).provenance_fingerprint
+                        for r in spec.resource_analyses
+                    }
+                }
+                if spec.resource_analyses
+                else {}
+            ),
+            **(
+                {
                     "drift_analyses": {
                         d: registry.get(DriftAnalysis, d).provenance_fingerprint
                         for d in spec.drift_analyses
@@ -1165,6 +1234,7 @@ def build(registry: Registry, store: ArtifactStore, spec: ProfileSpec) -> Built:
     _drift(registry, spec, acc)
     _stress(registry, spec, acc)
     _calibration_analysis(registry, spec, acc)
+    _resource_system(registry, spec, acc)
     runs = [spec.baseline_run]
     for fid in spec.fault_experiments:
         runs += [

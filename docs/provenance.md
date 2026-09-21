@@ -59,6 +59,17 @@ Provenance describes what was *recorded*; it does not prove the recorded source 
 dirty tree is flagged, its diff is not stored), nor capture system libraries, hardware
 accelerators, or data contents.
 
+## Resource analyses (Phase 16)
+
+Every resource analysis is a Run with its own Provenance record (source revision, environment, dependency
+digest, and the recorded worker count and timeout). Its `resources/spec.json` records the model and dataset
+fingerprints, the split, the source revision, the environment snapshot ID, the seed, the stress identities, the
+workload digest and the whole specification (batch size, warmup, measurement configuration, timeout, workers);
+`environment.json` adds the OS, Python and package versions, CPU count, device, the measurement backends and the
+timer resolution. The provenance fingerprint covers the definition and the environment but **not the timings**,
+so a repeated measurement in the same environment has the same fingerprint and is a new analysis. See
+[resources.md](resources.md).
+
 ## Calibration analyses (Phase 15)
 
 Every calibration analysis is a Run with its own Provenance record (source revision, environment,

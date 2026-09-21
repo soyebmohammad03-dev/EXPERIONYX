@@ -1,6 +1,6 @@
 """One REAL workspace, every phase, one chain: the iris/scikit-learn baseline (Phases 1-4), the fault
 laboratory (5), failure discovery (6), slices (11), temporal shift (12), data quality (13), model stress
-(14) and a reliability profile (8) that references them, then replays and provenance checks across the
+(14), calibration (15), a real resource measurement (16) and a reliability profile (8) that references them, then replays and provenance checks across the
 phases. Also CLI smoke coverage: every command group must at least load its help, and the read-only
 commands must run against the populated workspace. An engineering integration test of the machinery;
 not a finding about iris."""
@@ -118,6 +118,19 @@ def test_every_phase_runs_on_one_workspace_and_replays(
         and stress_doc["summary"]["coverage"]["completed"] == 2
     )
     assert stress_doc["summary"]["links"]["failure_discovery"]["status"] == "COMPLETED"
+    # Phase 15: calibration of the stored predictions of the same baseline
+    cb = {"baseline_run": w.baseline, "prediction_source": "PREDICT_PROBA", "statistics": {"resamples": 60, "permutations": 60, "min_samples": 10}}  # fmt: skip
+    code, out, _ = cli(w, capsys, "calibration", "evaluate", write(tmp_path, "cb.json", cb))
+    cal_id = json.loads(out)["analysis_id"]
+    assert code in (0, 3) and cal_id.startswith("cba_")
+    # Phase 16: a REAL resource measurement of the same model and dataset (environment-specific), which
+    # references the earlier calibration and stress analyses as context without recomputing them
+    rs = {"model_id": w.mid, "dataset_id": w.did, "split": "test", "batch_size": 8, "repeats": 5, "warmup_trials": 1, "calibration_analyses": [cal_id], "stress_analyses": [stress_id]}  # fmt: skip
+    code, out, err = cli(w, capsys, "resources", "run", write(tmp_path, "rs.json", rs), "--investigation", w.inv)  # fmt: skip
+    assert code == 0, err
+    resource_doc = json.loads(out)
+    resource_id = resource_doc["analysis_id"]
+    assert resource_id.startswith("rsa_") and resource_doc["summary"]["references"]["stress_analyses"] == [stress_id]  # fmt: skip
     with SqliteRegistry(w.ws / "registry.sqlite") as reg:
         store = LocalArtifactStore(w.ws / "experiments")
         ex = Executor(
@@ -138,6 +151,8 @@ def test_every_phase_runs_on_one_workspace_and_replays(
             (slice_id,),
             (drift_id,),
             (stress_id,),
+            (cal_id,),
+            (resource_id,),
         )
         prof = run_profile(
             reg, store, ex, w.inv, spec
@@ -150,6 +165,10 @@ def test_every_phase_runs_on_one_workspace_and_replays(
             and dims["DISTRIBUTION_SHIFT"]["status"] == "DERIVED"
             and dims["MODEL_STRESS"]["status"] in ("DERIVED", "INSUFFICIENT_EVIDENCE")
         )
+        assert dims["CALIBRATION_ANALYSIS"]["status"] in ("DERIVED", "INSUFFICIENT_EVIDENCE")
+        assert (
+            dims["RESOURCE_SYSTEM"]["status"] == "DERIVED"
+        )  # a real measurement with enough trials
         assert "no overall score" in doc["no_score"] and all("score" not in k.lower() for k in dims)
         assert (
             reg.get(SliceAnalysis, slice_id).baseline_run_id
@@ -176,9 +195,12 @@ def test_every_phase_runs_on_one_workspace_and_replays(
             == 3
         )
         n_before = len(reg.find(Run))
-    for group, ident in (("drift", drift_id), ("data-quality", quality_id), ("stress", stress_id)):
+    for group, ident in (("drift", drift_id), ("data-quality", quality_id), ("stress", stress_id), ("calibration", cal_id)):  # fmt: skip
         code, out, _ = cli(w, capsys, group, "replay", ident)
         assert code == 0 and json.loads(out)["deterministic"] is True, group
+    code, out, _ = cli(w, capsys, "resources", "replay", resource_id)  # the DEFINITION reproduces; timing is not compared  # fmt: skip
+    rep = json.loads(out)
+    assert code == 0 and rep["definition_reproduced"] is True and rep["outputs_reproduced"] is True and rep["timing"] == "NOT_EXPECTED_TO_REPRODUCE"  # fmt: skip
     code, out, _ = cli(w, capsys, "stress", "compare", stress_id)
     assert code == 0 and json.loads(out)["reproduced"] is True
     code, out, _ = cli(w, capsys, "reliability", "replay", prof.profile_id)
@@ -188,7 +210,7 @@ def test_every_phase_runs_on_one_workspace_and_replays(
         assert reg.find(Investigation)
 
 
-GROUPS = ["fault", "failure", "interaction", "reliability", "benchmark", "stats", "slice", "drift", "data-quality", "stress", "dataset", "model", "evaluation", "adapters", "demo"]  # fmt: skip
+GROUPS = ["fault", "failure", "interaction", "reliability", "benchmark", "stats", "slice", "drift", "data-quality", "stress", "calibration", "resources", "dataset", "model", "evaluation", "adapters", "demo"]  # fmt: skip
 
 
 @pytest.mark.parametrize("group", GROUPS)
@@ -202,7 +224,7 @@ def test_every_command_group_loads_its_help(group: str, capsys: pytest.CaptureFi
 def test_read_only_commands_run_against_the_populated_workspace(
     world: World, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    for args in (("info",), ("status",), ("faults",), ("stress", "list"), ("data-quality", "list"), ("drift", "list"), ("slice", "list", "--analyses"), ("stress", "families"), ("data-quality", "checks")):  # fmt: skip
+    for args in (("info",), ("status",), ("faults",), ("stress", "list"), ("calibration", "list"), ("resources", "list"), ("data-quality", "list"), ("drift", "list"), ("slice", "list", "--analyses"), ("stress", "families"), ("data-quality", "checks")):  # fmt: skip
         code, out, err = cli(world, capsys, *args)
         assert code == 0 and "Traceback" not in err, (args, err)
         assert out.strip(), args

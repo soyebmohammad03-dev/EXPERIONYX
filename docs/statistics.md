@@ -122,6 +122,19 @@ for missingness and validity rate differences between groups, and `adjust_pvalue
 family. Its own procedures are descriptive: Tukey/MAD outlier rules, population skewness and kurtosis,
 Pearson correlation and value purity as leakage *indicators*. None of them is a test or a verdict.
 
+## Reuse by resource analysis (Phase 16)
+
+The resource laboratory ([resources.md](resources.md)) adds no inference of its own. It uses `summarize` and the
+seeded bootstrap percentile interval of the mean and median of trial-level times and throughputs (only with enough
+completed trials), and, for comparisons, `compare` (effect sizes, permutation or paired sign-flip test, bootstrap
+interval of the difference) and `adjust_pvalues` across the family of treatments against the reference. Pairing is
+declared: trial-level values are UNPAIRED (separate executions), per-sample latency at batch size 1 is PAIRED by
+sample ID. The bootstrap assumes exchangeable trials; the analysis reports the lag-1 autocorrelation in trial
+order as a drift diagnostic. Repeated trials on one machine are not independent samples of a hardware population,
+so an interval describes measurement variability under these conditions, not hardware or environment variability
+(reported `UNAVAILABLE`). Percentiles use the same linear interpolation as the rest of the repository and are
+flagged when few observations lie above them.
+
 ## Reuse by calibration analysis (Phase 15)
 
 The calibration engine ([calibration.md](calibration.md)) uses the Phase 10 core for: Wilson intervals of

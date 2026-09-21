@@ -78,6 +78,7 @@ class SklearnModelAdapter(BaseModelAdapter):
     NAME: ClassVar[str] = "sklearn"
     VERSION: ClassVar[str] = ADAPTER_VERSION
     FRAMEWORK: ClassVar[str] = "scikit-learn"
+    THREAD_SAFE_INFERENCE: ClassVar[bool] = True  # predict on a fitted estimator is read-only
     POSSIBLE_CAPABILITIES: ClassVar[frozenset[ModelCapability]] = frozenset(
         {ModelCapability.PREDICT, ModelCapability.BATCH_PREDICT, ModelCapability.PREDICT_PROBA}
     )

@@ -103,6 +103,11 @@ from experionyx.reliability.engine import run_profile
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.registry import ReliabilityProfileRegistry
 from experionyx.reliability.spec import ProfileSpec
+from experionyx.resources import compare as resource_compare
+from experionyx.resources import engine as resource_engine
+from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
+from experionyx.resources.registry import ResourceRegistry
+from experionyx.resources.spec import ResourceSpec
 from experionyx.slices import analysis as slice_an
 from experionyx.slices.data import dataset_for_run, load_baseline
 from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
@@ -2482,6 +2487,215 @@ def _cmd_calibration_replay(args: argparse.Namespace) -> int:
     return 0 if out["deterministic"] else 1
 
 
+# -- resource & systems reliability ----------------------------------------------------------------------------
+
+
+def _resource_spec(path: str) -> ResourceSpec:
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read resource spec {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExperionyxError("a resource spec file must be a JSON object")
+    return ResourceSpec.from_dict(doc)
+
+
+def _rsstore(args: argparse.Namespace) -> LocalArtifactStore:
+    return LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+
+
+def _resource_investigation(reg: SqliteRegistry, args: argparse.Namespace) -> str:
+    if args.investigation:
+        return str(args.investigation)
+    found = reg.find(Investigation)
+    if len(found) != 1:
+        raise ExperionyxError(
+            f"the workspace has {len(found)} investigations; choose one with --investigation"
+        )
+    return found[0].id
+
+
+def _resource_row(a: ResourceAnalysis) -> dict[str, object]:
+    s = a.summary
+    env = s.get("environment")
+    return {
+        "id": a.id,
+        "status": a.analysis_status,
+        "spec_id": a.spec_id,
+        "run_id": a.run_id,
+        "model_id": a.model_id,
+        "dataset_id": a.dataset_id,
+        "provenance_fingerprint": a.provenance_fingerprint,
+        "batch_size": to_jsonable(a.spec.get("batch_size")),
+        "workers": to_jsonable(a.spec.get("workers")),
+        "trials": to_jsonable(s.get("trials")),
+        "evidence_status": s.get("evidence_status"),
+        "environment_id": to_jsonable(
+            env.get("environment_id") if isinstance(env, Mapping) else None
+        ),
+    }
+
+
+def _resource_trial_row(t: ResourceTrial) -> dict[str, object]:
+    return {
+        "id": t.id,
+        "phase": t.phase,
+        "trial_index": t.trial_index,
+        "status": t.status,
+        "planned_samples": t.planned_samples,
+        "completed_samples": t.completed_samples,
+        "failed_samples": t.failed_samples,
+        "wall_seconds": t.wall_seconds,
+        "cpu_seconds": t.cpu_seconds,
+    }
+
+
+def _cmd_resources_validate(args: argparse.Namespace) -> int:
+    spec = _resource_spec(args.spec)
+    out: dict[str, object] = {
+        "valid": True,
+        "spec_id": spec.spec_id,
+        "model_id": spec.model_id,
+        "dataset_id": spec.dataset_id,
+        "split": spec.split,
+        "operation": spec.operation,
+        "batch_size": spec.batch_size,
+        "repeats": spec.repeats,
+        "warmup_trials": spec.warmup_trials,
+        "workers": spec.workers,
+        "timeout_seconds": spec.timeout_seconds,
+        "stress_ids": list(spec.stress_ids),
+        "note": "the spec identity is the experimental definition; timing is environment-specific and is never part of it",
+    }
+    if args.preflight:
+        with _open(args.workspace) as reg:
+            adapters = default_registries(entry_points=True)
+            out["preflight"] = resource_engine.preflight(
+                reg, _rsstore(args), adapters, Path(args.workspace), spec
+            )
+    _emit(out, f"VALID: {spec.spec_id}", args)
+    return 0
+
+
+def _cmd_resources_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        cols = {k: v for k, v in (("spec_id", args.spec_id), ("analysis_status", args.status)) if v}
+        rows = [_resource_row(a) for a in ResourceRegistry(reg, _rsstore(args)).analyses(**cols)]
+    _emit(
+        {"analyses": rows}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in rows), args
+    )
+    return 0
+
+
+def _cmd_resources_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        rr = ResourceRegistry(reg, _rsstore(args))
+        if args.id.startswith("rst_"):
+            t = reg.get(ResourceTrial, args.id)
+            doc: dict[str, object] = {**_resource_trial_row(t), "analysis_id": t.analysis_id}
+        else:
+            a = rr.analysis(args.id)
+            doc = {
+                **_resource_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": rr.provenance(a.id),
+                "trials": [_resource_trial_row(t) for t in rr.trials(a.id)],
+                "artifacts": [
+                    {"path": x.path, "id": x.id, "digest": x.digest} for x in rr.artifacts(a.id)
+                ],
+            }
+            if args.document:
+                doc["document"] = rr.document(a.id, args.document)
+            if args.full:
+                doc["documents"] = {n: rr.document(a.id, n) for n in resource_engine.DOCUMENTS}
+    _emit(doc, f"{args.id}: {doc.get('status')}", args)
+    return 0
+
+
+def _cmd_resources_run(args: argparse.Namespace) -> int:
+    spec = _resource_spec(args.spec)
+    with _open(args.workspace) as reg:
+        out = resource_engine.run_resource_request(
+            reg,
+            _rsstore(args),
+            _executor(reg, args.workspace),
+            _resource_investigation(reg, args),
+            spec,
+        )
+        a = reg.get(ResourceAnalysis, out.analysis_id) if out.analysis_id else None
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "summary": None if a is None else to_jsonable(a.summary),
+        "note": "environment-specific engineering measurement",
+    }
+    _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
+    return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
+
+
+def _cmd_resources_sweep(args: argparse.Namespace) -> int:
+    spec = _resource_spec(args.spec)
+    try:
+        sizes = [int(x) for x in args.batch_sizes.split(",")]
+    except ValueError as exc:
+        raise ExperionyxError(f"--batch-sizes must be comma-separated integers: {exc}") from exc
+    with _open(args.workspace) as reg:
+        units = resource_compare.run_sweep(
+            reg,
+            _rsstore(args),
+            _executor(reg, args.workspace),
+            _resource_investigation(reg, args),
+            spec,
+            sizes,
+        )
+        ids = [u["analysis_id"] for u in units]
+        cmp_doc = None
+        if len(ids) > 1 and all(ids):
+            cmp_doc = resource_compare.compare_analyses(
+                reg, _rsstore(args), ids, metric=args.metric, correction=args.correction
+            )
+    doc: dict[str, object] = {
+        "units": units,
+        "comparison": cmp_doc,
+        "note": "every batch size is a separate persisted measurement; environment-specific engineering measurement",
+    }
+    _emit(
+        doc,
+        "\n".join(f"batch_size={u['batch_size']} {u['status']} {u['analysis_id']}" for u in units),
+        args,
+    )
+    return 0 if all(u["status"] == "COMPLETED" and u["analysis_id"] for u in units) else 3
+
+
+def _cmd_resources_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = resource_compare.compare_analyses(
+            reg,
+            _rsstore(args),
+            args.ids,
+            metric=args.metric,
+            correction=args.correction,
+            allow_environment_mismatch=args.allow_environment_mismatch,
+        )
+    _emit(out, f"compared {len(args.ids)} analyses on {args.metric}", args)
+    return 0
+
+
+def _cmd_resources_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = resource_engine.replay_check(
+            reg, _rsstore(args), _executor(reg, args.workspace), args.id
+        )
+    _emit(
+        out,
+        f"{'definition reproduced' if out['definition_reproduced'] else 'DIFFERS'}: {args.id}",
+        args,
+    )
+    return 0 if out["definition_reproduced"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -3274,6 +3488,85 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_replay)
+
+    rs = group(
+        "resources",
+        "latency, throughput and resource use of a real workload (environment-specific engineering measurements; no composite score)",
+    )
+    p = rs.add_parser(
+        "validate",
+        help="parse a resource spec; prints its identity (--preflight refuses unsupported requests before anything runs)",
+    )
+    p.add_argument("spec")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="also load the model and dataset and check every requested capability",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_validate)
+    p = rs.add_parser("list", help="list resource analyses")
+    p.add_argument("--spec-id")
+    p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_list)
+    p = rs.add_parser(
+        "inspect",
+        help="a resource analysis (rsa_) with provenance, trials and artifacts, or one trial (rst_)",
+    )
+    p.add_argument("id")
+    p.add_argument(
+        "--document",
+        choices=list(resource_engine.DOCUMENTS),
+        help="include one stored document (evidence)",
+    )
+    p.add_argument("--full", action="store_true", help="include every stored document")
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_inspect)
+    p = rs.add_parser(
+        "run",
+        help="measure a workload as a new run; exit 3 if any trial failed or timed out or evidence is insufficient",
+    )
+    p.add_argument("spec")
+    p.add_argument("--investigation", help="investigation ID (default: the workspace's only one)")
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_run)
+    p = rs.add_parser(
+        "sweep",
+        help="one separately persisted measurement per batch size, then a corrected comparison against the first",
+    )
+    p.add_argument("spec")
+    p.add_argument("--batch-sizes", required=True, help="comma-separated, e.g. 1,8,32")
+    p.add_argument("--metric", choices=list(resource_compare.METRICS), default="throughput")
+    p.add_argument(
+        "--correction", choices=["NONE", "BONFERRONI", "BENJAMINI_HOCHBERG"], default="BONFERRONI"
+    )
+    p.add_argument("--investigation")
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_sweep)
+    p = rs.add_parser(
+        "compare",
+        help="compare analyses against the first (Phase 10 statistics, multiple-comparison corrected); nothing is stored",
+    )
+    p.add_argument("ids", nargs="+")
+    p.add_argument("--metric", choices=list(resource_compare.METRICS), default="throughput")
+    p.add_argument(
+        "--correction", choices=["NONE", "BONFERRONI", "BENJAMINI_HOCHBERG"], default="BONFERRONI"
+    )
+    p.add_argument(
+        "--allow-environment-mismatch",
+        action="store_true",
+        help="compare analyses from different environments (confounded, labelled)",
+    )
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_compare)
+    p = rs.add_parser(
+        "replay",
+        help="replay the measurement as a NEW run; compares the definition and the model outputs, never the timings; exit 1 on a difference",
+    )
+    p.add_argument("id")
+    slfmt(p)
+    p.set_defaults(func=_cmd_resources_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

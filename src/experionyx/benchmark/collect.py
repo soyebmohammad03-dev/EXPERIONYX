@@ -5,7 +5,7 @@ was and was not executed; it is never a measure of robustness, and missing cover
 represented as robustness."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from experionyx.artifacts import ArtifactStore
@@ -27,6 +27,7 @@ from experionyx.provenance import Provenance
 from experionyx.registry import Registry
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.taxonomy import DimensionStatus
+from experionyx.resources.entities import ResourceAnalysis
 from experionyx.slices.entities import SliceAnalysis
 from experionyx.stress.entities import StressAnalysis
 
@@ -62,6 +63,9 @@ class Executed:
     drift_analysis: str | None = None
     stress_analysis: str | None = None
     calibration_analysis: str | None = None
+    resource_analyses: Mapping[str, str] = field(
+        default_factory=dict
+    )  # resource spec ID -> analysis ID
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +85,11 @@ class Executed:
                 if self.calibration_analysis
                 else {}
             ),
+            **(
+                {"resource_analyses": dict(self.resource_analyses)}
+                if self.resource_analyses
+                else {}
+            ),
         }
 
     @classmethod
@@ -98,6 +107,7 @@ class Executed:
             d.get("drift_analysis"),
             d.get("stress_analysis"),
             d.get("calibration_analysis"),
+            dict(d.get("resource_analyses") or {}),
         )
 
 
@@ -561,6 +571,31 @@ def collect(
         else:
             reasons.append("the requested calibration analysis did not run")
 
+    # -- resource measurements (only when the benchmark explicitly requested them) --------------------------------------------------------------
+    res_block: dict[str, Any] = {"status": DimensionStatus.UNAVAILABLE.value, "reason": "no resource measurement was requested by this benchmark"}  # fmt: skip
+    res_fps: dict[str, str] = {}
+    if spec.resources:
+        runits: list[dict[str, Any]] = []
+        for r in spec.resources:
+            ru: dict[str, Any] = {"spec_id": r.spec_id, "batch_size": r.batch_size, "workers": r.workers, "operation": r.operation, "analysis_id": None}  # fmt: skip
+            aid = ex.resource_analyses.get(r.spec_id)
+            err = ex.errors.get(f"resource:{r.spec_id}")
+            if aid is None:
+                ru.update(status="UNSUPPORTED" if err and "UNAVAILABLE" in err else "FAILED", reason=err or "the resource measurement did not run")  # fmt: skip
+            else:
+                ra = registry.get(ResourceAnalysis, aid)
+                res_fps[r.spec_id] = ra.provenance_fingerprint
+                tr = to_jsonable(ra.summary.get("trials")) or {}
+                measured = ra.summary.get("evidence_status") == "MEASURED"
+                st = "EXECUTED" if measured else "TIMED_OUT" if tr.get("timed_out") else "FAILED" if tr.get("failed") else "INSUFFICIENT_EVIDENCE"  # type: ignore[attr-defined]  # fmt: skip
+                ru.update(analysis_id=aid, status=st, analysis_status=ra.analysis_status, trials=tr, source={"kind": "RESOURCE_ANALYSIS", "id": aid})  # fmt: skip
+            runits.append(ru)
+        cnt = _count(x["status"] for x in runits)
+        cov = {"planned": len(runits), "executed": cnt.get("EXECUTED", 0), "unsupported": cnt.get("UNSUPPORTED", 0), "failed": cnt.get("FAILED", 0), "timed_out": cnt.get("TIMED_OUT", 0), "insufficient_evidence": cnt.get("INSUFFICIENT_EVIDENCE", 0)}  # fmt: skip
+        res_block = {"status": DimensionStatus.DERIVED.value if cov["executed"] else DimensionStatus.INSUFFICIENT_EVIDENCE.value if any(x["analysis_id"] for x in runits) else DimensionStatus.UNAVAILABLE.value, "planned": len(runits), "coverage": cov, "units": runits, "note": "resource analyses are referenced, not duplicated; measurements are environment-specific engineering measurements and no resource score is formed"}  # fmt: skip
+        if cov["executed"] != cov["planned"]:
+            reasons.append("some requested resource measurements are unsupported, failed, timed out or had insufficient evidence")  # fmt: skip
+
     # -- coverage ---------------------------------------------------------------------------------------------------------------------------------
     trials = {s.value: sum(u["status"] == s.value for u in fault_units) for s in UnitStatus}
     pts_total = sum(f.get("points_requested", 0) for f in fam.values())
@@ -638,6 +673,7 @@ def collect(
         **({"drift_analysis": drift_block["status"]} if spec.drift is not None else {}),
         **({"stress_analysis": stress_block["status"]} if spec.stress is not None else {}),
         **({"calibration_analysis": cal_block["status"]} if spec.calibration is not None else {}),
+        **({"resource_analysis": res_block["status"]} if spec.resources else {}),
         "uncertainty": DimensionStatus.DERIVED.value if intervals else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
         "reproducibility": DimensionStatus.DERIVED.value if responses else DimensionStatus.INSUFFICIENT_EVIDENCE.value,
     }  # fmt: skip
@@ -650,6 +686,7 @@ def collect(
         **({"drift_analysis": drift_block} if spec.drift is not None else {}),
         **({"stress_analysis": stress_block} if spec.stress is not None else {}),
         **({"calibration_analysis": cal_block} if spec.calibration is not None else {}),
+        **({"resource_analysis": res_block} if spec.resources else {}),
         "uncertainty": {"status": section["uncertainty"], "intervals_available": intervals, "caveats": ["intervals are descriptive spreads under each analysis's own method and are not comparable across methods", *sorted({w for r in inter for w in ((r.get("bootstrap") or {}).get("warnings") or [])})]},
         "reproducibility": {"status": section["reproducibility"], "trials_per_family": {k: {"requested": f.get("trials_requested"), "completed": f.get("completed")} for k, f in fam.items() if "trials_requested" in f}, "distinct_seeds": len(spec.seeds), "interactions_by_lifecycle_state": _count(r.get("lifecycle_state") for r in inter if r.get("lifecycle_state")), "unresolved": list(reasons), "replay": "the collect Run can be replayed (`benchmark replay`); re-executing the whole protocol in another registry is the reproduction test"},
     }  # fmt: skip
@@ -672,6 +709,7 @@ def collect(
             **({"drift_analysis": drift_fp} if spec.drift is not None else {}),
             **({"stress_analysis": stress_fp} if spec.stress is not None else {}),
             **({"calibration_analysis": cal_fp} if spec.calibration is not None else {}),
+            **({"resource_analyses": res_fps} if spec.resources else {}),
         }
     )
     summary = {

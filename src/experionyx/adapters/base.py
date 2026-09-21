@@ -156,6 +156,10 @@ class BaseModelAdapter(ABC):  # abstract only by convention: shared behaviour
     FRAMEWORK: ClassVar[str]
     POSSIBLE_CAPABILITIES: ClassVar[frozenset[ModelCapability]]
     DESCRIPTION: ClassVar[str] = ""
+    # Opt-in: True only if concurrent predict/predict_proba calls on ONE loaded instance are safe
+    # (read-only inference, no shared mutable state). The Resource Laboratory runs a multi-worker
+    # measurement only for adapters that declare it; otherwise it reports UNAVAILABLE.
+    THREAD_SAFE_INFERENCE: ClassVar[bool] = False
 
     @classmethod
     def info(cls) -> AdapterInfo:

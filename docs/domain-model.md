@@ -80,6 +80,14 @@ artifact. See [reliability.md](reliability.md).
 status and headline metrics. Bins, per-sample evidence, intervals and comparisons live in digest-verified run
 artifacts. Both are append-only. See [calibration.md](calibration.md).
 
+## Resource records (Phase 16)
+
+`ResourceAnalysis` (`rsa_`) is one measured Run of a resource specification (its identity includes the Run, so a
+repeated measurement is a new record); `ResourceTrial` (`rst_`) is one warmup or measured pass over the workload
+with its status (`COMPLETED`, `FAILED`, `TIMED_OUT`), sample counts and wall/CPU seconds. Raw per-batch timings,
+statistics and the environment live in digest-verified run artifacts. Both are append-only. See
+[resources.md](resources.md).
+
 ## Stress records (Phase 14)
 
 `StressAnalysis` (`sxa_`) is one stress experiment over a validated baseline; `StressTrial` (`sxt_`) is one

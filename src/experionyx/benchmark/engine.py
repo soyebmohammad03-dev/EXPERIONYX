@@ -51,6 +51,7 @@ from experionyx.registry import Registry
 from experionyx.reliability.engine import run_profile
 from experionyx.reliability.spec import ProfileSpec
 from experionyx.reliability.taxonomy import Scope
+from experionyx.resources.engine import run_resource_request
 from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
 from experionyx.stress.engine import run_stress_experiment
 from experionyx.stress.spec import StressDesign
@@ -275,6 +276,16 @@ def run_benchmark(
                 errors["calibration"] = f"the calibration analysis run ended {co.status.value}"
         except (ExperionyxError, ValueError) as exc:
             errors["calibration"] = f"{type(exc).__name__}: {exc}"
+    resource_analyses: dict[str, str] = {}
+    for r in spec.resources:
+        try:
+            ro = run_resource_request(registry, store, executor, inv, r)
+            if ro.analysis_id is None:
+                errors[f"resource:{r.spec_id}"] = f"the resource run ended {ro.status.value}"
+            else:
+                resource_analyses[r.spec_id] = ro.analysis_id
+        except (ExperionyxError, ValueError) as exc:
+            errors[f"resource:{r.spec_id}"] = f"{type(exc).__name__}: {exc}"
     profile_id: str | None = None
     if spec.profile:
         try:
@@ -293,6 +304,7 @@ def run_benchmark(
                     (drift_analysis_id,) if drift_analysis_id else (),
                     (stress_analysis_id,) if stress_analysis_id else (),
                     (calibration_analysis_id,) if calibration_analysis_id else (),
+                    tuple(resource_analyses.values()),
                 ),
             )
             profile_id = pr.profile_id
@@ -313,6 +325,7 @@ def run_benchmark(
         drift_analysis_id,
         stress_analysis_id,
         calibration_analysis_id,
+        resource_analyses,
     )
     conf = ConfigurationRef(
         {

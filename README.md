@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 15 (calibration & uncertainty laboratory).** The typed domain model, a local SQLite registry,
+> **Status: Phase 16 (resource & systems reliability laboratory).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -112,6 +112,12 @@ See [docs/architecture.md](docs/architecture.md) and
   statistical uncertainty of the metrics (Wilson and seeded bootstrap), descriptive predictive dispersion,
   and explicit slice, window and stress contexts, all replayable. Confidence is not automatically
   uncertainty; unsupported uncertainty is reported unavailable; no universal calibration or uncertainty score.
+- Resource & systems reliability laboratory ([docs/resources.md](docs/resources.md)): real measurements of
+  latency, throughput, batch-size and worker-count behaviour, timeouts and failures, process CPU time and
+  peak memory, from repeated warmed-up trials with raw timings preserved, Phase 10 intervals and corrected
+  comparisons, provenance and replay of the definition and the model outputs. Every number is an
+  environment-specific engineering measurement; unsupported measurements are reported unavailable; no
+  composite resource score, and performance measurement is not reliability.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

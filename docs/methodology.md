@@ -63,6 +63,13 @@ vocabulary (`experionyx.domain`); enforcement arrives with later phases.
     supports it and is otherwise `UNAVAILABLE`; no universal calibration or uncertainty score exists
     ([calibration.md](calibration.md)).
 
+19. **A timing is an environment-specific measurement, not a property of the model.** Latency, throughput,
+    CPU time and peak memory are measured by really running the model, from repeated warmed-up trials whose raw
+    values are kept; initialization, warmup, steady state and end to end are separate numbers; a timeout or a
+    failure is never a success; a measurement the platform or the adapter cannot provide is `UNAVAILABLE`;
+    repeated trials on one machine are not independent samples of a hardware population; performance
+    measurement is not reliability, and no composite resource score exists ([resources.md](resources.md)).
+
 17. **A stress is an experiment, not a score.** A stress trial deliberately changes one recorded thing,
     is compared with a validated baseline, keeps raw values, direction-aware deterioration and paired
     statistics, and never yields a robustness score or a causal claim; a lack of stress evidence is

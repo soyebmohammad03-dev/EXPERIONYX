@@ -51,6 +51,13 @@ declares what it can support (`POSSIBLE_CAPABILITIES`); an *instance* reports wh
 `UnsupportedCapabilityError`. Embeddings, gradients and feature importance are deliberately not
 defined yet.
 
+### Thread-safe inference (optional, Phase 16)
+
+A model adapter may declare `THREAD_SAFE_INFERENCE = True` (default `False`): concurrent `predict` /
+`predict_proba` calls on one loaded instance are safe (read-only inference, no shared mutable state). The
+scikit-learn and PyTorch adapters declare it. The resource laboratory ([resources.md](resources.md)) runs a
+multi-worker measurement only for adapters that declare it and otherwise reports it `UNAVAILABLE`.
+
 ## Tasks, schemas, metadata
 `TaskType`: CLASSIFICATION, REGRESSION, MULTILABEL_CLASSIFICATION, IMAGE_CLASSIFICATION,
 TIME_SERIES, ANOMALY_DETECTION, CUSTOM (known but outside the list), UNKNOWN (not safely
