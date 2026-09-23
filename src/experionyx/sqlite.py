@@ -61,6 +61,13 @@ from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
+from experionyx.scheduler.entities import (
+    ExecutionAttempt,
+    Schedule,
+    ScheduleRun,
+    ScheduleUnit,
+    UnitStateTransition,
+)
 from experionyx.slices.entities import Slice, SliceAnalysis
 from experionyx.stats.entities import StatisticalAnalysis
 from experionyx.stress.entities import StressAnalysis, StressTrial
@@ -71,7 +78,8 @@ from experionyx.stress.entities import StressAnalysis, StressTrial
 # 12: data quality analyses and check results. 13: stress analyses and trials.
 # 14: calibration analyses and per-context calibration results.
 # 15: resource analyses and per-pass resource trials.
-DB_SCHEMA_VERSION = 15
+# 16: schedules, schedule runs, schedule units, execution attempts and unit state transitions.
+DB_SCHEMA_VERSION = 16
 
 
 @dataclass(frozen=True)
@@ -334,6 +342,34 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("phase", "status"),
         since=15,
     ),
+    Schedule: _Spec("schedules", plain=("spec_id",), since=16),
+    ScheduleRun: _Spec(
+        "schedule_runs",
+        refs=(("schedule_id", Schedule), ("investigation_id", Investigation)),
+        plain=("sequence", "status"),
+        mutable=True,
+        since=16,
+    ),
+    ScheduleUnit: _Spec(
+        "schedule_units",
+        refs=(("schedule_id", Schedule),),
+        plain=("unit_key", "unit_kind", "status"),
+        mutable=True,
+        since=16,
+    ),
+    ExecutionAttempt: _Spec(
+        "execution_attempts",
+        refs=(("unit_id", ScheduleUnit), ("schedule_run_id", ScheduleRun), ("run_id", Run)),
+        plain=("attempt", "outcome"),
+        optional=("run_id",),
+        since=16,
+    ),
+    UnitStateTransition: _Spec(
+        "unit_state_transitions",
+        refs=(("unit_id", ScheduleUnit), ("schedule_run_id", ScheduleRun)),
+        plain=("sequence", "from_status", "to_status"),
+        since=16,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -488,6 +524,13 @@ def _migrate_14_to_15(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_15_to_16(conn: sqlite3.Connection) -> None:
+    """Phase 17: schedules, schedule runs, schedule units, execution attempts and unit state
+    transitions (new tables only)."""
+    for statement in _ddl(upto=16, since=16):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -503,6 +546,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     12: _migrate_12_to_13,
     13: _migrate_13_to_14,
     14: _migrate_14_to_15,
+    15: _migrate_15_to_16,
 }
 
 
@@ -629,6 +673,11 @@ class SqliteRegistry:
                 self._check_reliability_profile(entity)
             elif isinstance(entity, BenchmarkResult):
                 self._check_benchmark_result(entity)
+            elif isinstance(entity, ScheduleUnit):
+                for dep in entity.depends_on:
+                    self._require(ScheduleUnit, dep, "schedule_units.depends_on")
+            elif isinstance(entity, ExecutionAttempt):
+                self._check_execution_attempt(entity)
             payload = entity.to_dict()
             cols = ["id", *spec.columns, "payload", "content_hash"]
             values = [
@@ -641,6 +690,18 @@ class SqliteRegistry:
                 f"INSERT INTO {spec.table} ({', '.join(cols)}) "  # noqa: S608
                 f"VALUES ({', '.join('?' * len(cols))})",
                 values,
+            )
+
+    def _check_execution_attempt(self, a: ExecutionAttempt) -> None:
+        unit = self.get(ScheduleUnit, a.unit_id)
+        run = self.get(ScheduleRun, a.schedule_run_id)
+        if unit.schedule_id != run.schedule_id:
+            raise ValidationError(
+                "execution attempt's unit and schedule run belong to different schedules"
+            )
+        if a.attempt != len(self.find(ExecutionAttempt, unit_id=a.unit_id)):
+            raise ValidationError(
+                f"execution attempt {a.attempt} is not the next attempt for {a.unit_id}"
             )
 
     def _check_benchmark_result(self, r: BenchmarkResult) -> None:
@@ -807,11 +868,36 @@ class SqliteRegistry:
         return [self._decode(cls, r[0], r[1], r[2]) for r in rows]
 
     def update_status(
-        self, entity: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+        self,
+        entity: (
+            Experiment
+            | Run
+            | FaultExperiment
+            | FailureMode
+            | InteractionAnalysis
+            | ScheduleRun
+            | ScheduleUnit
+        ),
     ) -> None:
         with self.transaction():
-            current: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
-            expected: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+            current: (
+                Experiment
+                | Run
+                | FaultExperiment
+                | FailureMode
+                | InteractionAnalysis
+                | ScheduleRun
+                | ScheduleUnit
+            )
+            expected: (
+                Experiment
+                | Run
+                | FaultExperiment
+                | FailureMode
+                | InteractionAnalysis
+                | ScheduleRun
+                | ScheduleUnit
+            )
             if isinstance(entity, Experiment):
                 current = self.get(Experiment, entity.id)
                 expected = current.with_status(entity.status)
@@ -823,6 +909,12 @@ class SqliteRegistry:
                 expected = current.with_status(entity.status)
             elif isinstance(entity, InteractionAnalysis):
                 current = self.get(InteractionAnalysis, entity.id)
+                expected = current.with_status(entity.status)
+            elif isinstance(entity, ScheduleRun):
+                current = self.get(ScheduleRun, entity.id)
+                expected = current.with_status(entity.status)
+            elif isinstance(entity, ScheduleUnit):
+                current = self.get(ScheduleUnit, entity.id)
                 expected = current.with_status(entity.status)
             else:
                 current = self.get(Run, entity.id)

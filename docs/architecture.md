@@ -1,13 +1,13 @@
 # Architecture
 
-> **Current state:** Phase 16. Implemented: the domain model ([domain-model.md](domain-model.md)),
+> **Current state:** Phase 17. Implemented: the domain model ([domain-model.md](domain-model.md)),
 > hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite backend
 > ([registry.md](registry.md)), an execution engine ([execution.md](execution.md)), provenance
 > capture ([provenance.md](provenance.md)), a local artifact store ([artifacts.md](artifacts.md)), a framework-agnostic model/dataset adapter layer with
 > sklearn and PyTorch implementations ([adapters.md](adapters.md),
 > [model-dataset-identity.md](model-dataset-identity.md)) a baseline evaluation and autopsy engine ([evaluation.md](evaluation.md),
 > [observation-vs-conclusion.md](observation-vs-conclusion.md)), a fault injection laboratory
-> ([faults.md](faults.md)), failure discovery and a failure registry ([failures.md](failures.md)) fault interaction analysis ([interactions.md](interactions.md)), reliability profiles ([reliability.md](reliability.md)), robustness benchmarks ([benchmarks.md](benchmarks.md)), and statistical analysis ([statistics.md](statistics.md)), slice analysis ([slices.md](slices.md)), temporal and distribution shift analysis ([drift.md](drift.md)), data quality analysis ([data-quality.md](data-quality.md)), model stress analysis ([stress.md](stress.md)), calibration and uncertainty analysis ([calibration.md](calibration.md)), resource and systems reliability measurement ([resources.md](resources.md)) and a CLI ([cli.md](cli.md)).
+> ([faults.md](faults.md)), failure discovery and a failure registry ([failures.md](failures.md)) fault interaction analysis ([interactions.md](interactions.md)), reliability profiles ([reliability.md](reliability.md)), robustness benchmarks ([benchmarks.md](benchmarks.md)), and statistical analysis ([statistics.md](statistics.md)), slice analysis ([slices.md](slices.md)), temporal and distribution shift analysis ([drift.md](drift.md)), data quality analysis ([data-quality.md](data-quality.md)), model stress analysis ([stress.md](stress.md)), calibration and uncertainty analysis ([calibration.md](calibration.md)), resource and systems reliability measurement ([resources.md](resources.md)), an experiment scheduler and orchestration layer over every engine above ([scheduler.md](scheduler.md)) and a CLI ([cli.md](cli.md)).
 > Everything else below is **planned** and will be introduced
 > incrementally.
 

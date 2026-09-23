@@ -68,6 +68,14 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx slice validate\|register\|list\|inspect\|evaluate\|analyze\|compare …` | typed slice definitions, membership over a baseline run, per-slice analyses (exit 3 if some evidence is insufficient); see [slices.md](slices.md) |
 | `experionyx stats list\|inspect\|verify <sta_…>` | registered analyses; `verify` recomputes from the recorded sources and exits 1 unless reproduced |
 | `experionyx evaluation compare <run-a> <run-b>` | structured comparison; no winner, no significance test |
+| `experionyx scheduler validate <spec.json>` | check a schedule spec's DAG (cycles, references); the registry is never touched |
+| `experionyx scheduler expand <spec.json>` | materialize a spec into explicit, dependency-ordered `ScheduleUnit` records |
+| `experionyx scheduler run <spec.json> [--investigation I --max-workers N --dry-run]` | execute a schedule's DAG (idempotent, resumable, bounded-concurrent); `--dry-run` executes zero experiments; exits 1 unless every unit reaches `COMPLETED` |
+| `experionyx scheduler status\|inspect\|graph <sch_… \| spec_id-prefix>` | unit statuses/attempts/run history, the definition, or the dependency graph |
+| `experionyx scheduler resume <sch_…> [--investigation I --max-workers N]` | continue from the persisted spec; already-`SUCCEEDED` units are not re-run |
+| `experionyx scheduler cancel <sch_…>` | mark every open unit `CANCELLED`; completed evidence is never touched |
+| `experionyx scheduler retry <sch_…> --unit KEY` | explicitly request a new attempt at a `FAILED`/`TIMED_OUT` unit |
+| `experionyx scheduler replay <sch_…>` | re-run as a new attempt and diff unit outcomes; exits 1 on a non-environment-dependent difference; see [scheduler.md](scheduler.md) |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through

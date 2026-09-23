@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 16 (resource & systems reliability laboratory).** The typed domain model, a local SQLite registry,
+> **Status: Phase 17 (experiment scheduler & orchestration).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -118,6 +118,15 @@ See [docs/architecture.md](docs/architecture.md) and
   comparisons, provenance and replay of the definition and the model outputs. Every number is an
   environment-specific engineering measurement; unsupported measurements are reported unavailable; no
   composite resource score, and performance measurement is not reliability.
+- Experiment scheduler & orchestration ([docs/scheduler.md](docs/scheduler.md)): a durable, resumable,
+  dependency-aware orchestration layer over every existing engine (fault injection, failure discovery,
+  interaction analysis, benchmarks, statistical analysis, slices, drift, data quality, stress, calibration,
+  resources) via a thin dispatcher that never duplicates their logic. Compact specs expand deterministically
+  into an explicit, validated dependency graph with deterministic identity, ordering and a real state
+  machine; retries create new attempts without overwriting earlier ones; a resumed run never re-dispatches
+  already-succeeded work; concurrency is bounded and deterministic; dry-run executes zero experiments; every
+  plan, dispatch, retry, skip, block and outcome is recorded and auditable. No hidden work, no fabricated
+  resource guarantees, no forced kill of a running dispatch.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

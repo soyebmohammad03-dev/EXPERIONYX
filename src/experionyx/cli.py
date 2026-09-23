@@ -53,6 +53,7 @@ from experionyx.errors import (
     DesignRefusal,
     ExperionyxError,
     ProfileRefusal,
+    SchedulerRefusal,
 )
 from experionyx.evaluation.compare import compare_evaluations
 from experionyx.evaluation.config import (
@@ -98,6 +99,7 @@ from experionyx.interactions.lifecycle import (
 from experionyx.interactions.registry import InteractionRegistry
 from experionyx.interactions.taxonomy import InteractionStatus
 from experionyx.provenance import Provenance, RunOutcome
+from experionyx.registry import Registry
 from experionyx.reliability.engine import replay_check as profile_replay_check
 from experionyx.reliability.engine import run_profile
 from experionyx.reliability.entities import ReliabilityProfile
@@ -108,6 +110,22 @@ from experionyx.resources import engine as resource_engine
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.resources.registry import ResourceRegistry
 from experionyx.resources.spec import ResourceSpec
+from experionyx.scheduler.engine import UnitView as SchedulerUnitView
+from experionyx.scheduler.engine import (
+    cancel_schedule,
+    retry_unit,
+    run_schedule,
+    spec_from_schedule,
+)
+from experionyx.scheduler.engine import materialize as scheduler_materialize
+from experionyx.scheduler.engine import resolve_schedule as scheduler_resolve
+from experionyx.scheduler.engine import unit_views as scheduler_unit_views
+from experionyx.scheduler.engine import utc_now as scheduler_utc_now
+from experionyx.scheduler.entities import ScheduleRun as ScheduleRunEntity
+from experionyx.scheduler.graph import expand
+from experionyx.scheduler.graph import validation_report as scheduler_validation_report
+from experionyx.scheduler.spec import ScheduleSpec
+from experionyx.scheduler.taxonomy import ScheduleRunState
 from experionyx.slices import analysis as slice_an
 from experionyx.slices.data import dataset_for_run, load_baseline
 from experionyx.slices.engine import SliceAnalysisSpec, run_slice_analysis_request
@@ -1549,6 +1567,250 @@ def _cmd_benchmark_replay(args: argparse.Namespace) -> int:
         )
         _dump(out)
         return 0 if out["deterministic"] is True else 1
+
+
+def _load_schedule_spec(path: str) -> ScheduleSpec:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read schedule spec {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("a schedule spec file must be a JSON object")
+    return ScheduleSpec.from_dict(data)
+
+
+def _scheduler_open_registry(workspace: str) -> Callable[[], SqliteRegistry]:
+    def factory() -> SqliteRegistry:
+        return _open(workspace)
+
+    return factory
+
+
+def _scheduler_open_executor(workspace: str) -> Callable[[Registry], Executor]:
+    def factory(reg: Registry) -> Executor:
+        return Executor(
+            reg,
+            LocalArtifactStore(Path(workspace) / EXPERIMENTS_DIR),
+            source_root=Path.cwd(),
+            adapters=default_registries(entry_points=True),
+            inputs_root=Path(workspace),
+        )
+
+    return factory
+
+
+def _unit_row(v: SchedulerUnitView) -> dict[str, object]:
+    return v.to_dict()
+
+
+def _run_row(r: object) -> dict[str, object]:
+    from experionyx.scheduler.entities import ScheduleRun as _SR
+
+    assert isinstance(r, _SR)  # noqa: S101  # narrows for mypy; callers only pass ScheduleRun
+    return {
+        "id": r.id,
+        "sequence": r.sequence,
+        "status": r.status.value,
+        "dry_run": r.dry_run,
+        "investigation_id": r.investigation_id,
+        "created_at": r.created_at.isoformat(),
+    }
+
+
+def _cmd_scheduler_validate(args: argparse.Namespace) -> int:
+    spec = _load_schedule_spec(args.spec)
+    report = scheduler_validation_report(spec)
+    lines = [f"spec {report['spec_id']}: {'VALID' if report['valid'] else 'REFUSED'}"]
+    issues: Any = report.get("issues", [])
+    lines += [
+        f"  - {i['code']}: required {i['required']}; found {i['found']}; {i['why']}" for i in issues
+    ]
+    if report["valid"]:
+        lines.append(f"  {report['units']} unit(s), order: {report['order']}")
+    _emit(report, "\n".join(lines), args)
+    return 0 if report["valid"] else 1
+
+
+def _cmd_scheduler_expand(args: argparse.Namespace) -> int:
+    spec = _load_schedule_spec(args.spec)
+    with _open(args.workspace) as reg:
+        try:
+            sched, plan, units = scheduler_materialize(reg, spec, scheduler_utc_now())
+        except SchedulerRefusal as exc:
+            print("error: schedule refused; nothing was materialized", file=sys.stderr)
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        doc: dict[str, object] = {
+            "schedule_id": sched.id,
+            "spec_id": sched.spec_id,
+            "graph_hash": sched.graph_hash,
+            "units": [units[u.key].id for u in plan.units],
+            "order": [u.key for u in plan.units],
+        }
+        _emit(doc, f"schedule {sched.id}: {len(plan.units)} unit(s) expanded", args)
+    return 0
+
+
+def _cmd_scheduler_run(args: argparse.Namespace) -> int:
+    spec = _load_schedule_spec(args.spec)
+    result = run_schedule(
+        _scheduler_open_registry(args.workspace),
+        LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+        _scheduler_open_executor(args.workspace),
+        spec,
+        investigation_id=args.investigation,
+        max_workers=args.max_workers,
+        dry_run_only=args.dry_run,
+        source_root=Path.cwd(),
+    )
+    text = f"schedule {result.schedule_id}: {result.status.value if result.status else 'DRY_RUN'} {dict(result.counts)}"  # fmt: skip
+    _emit(result.to_dict(), text, args)
+    if result.dry_run:
+        return 0 if not result.issues else 1
+    return 0 if result.status is ScheduleRunState.COMPLETED else 1
+
+
+def _cmd_scheduler_resume(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        spec = spec_from_schedule(sched)
+    result = run_schedule(
+        _scheduler_open_registry(args.workspace),
+        LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+        _scheduler_open_executor(args.workspace),
+        spec,
+        investigation_id=args.investigation,
+        max_workers=args.max_workers,
+        source_root=Path.cwd(),
+    )
+    text = f"schedule {result.schedule_id}: resumed as {result.schedule_run_id}, {result.status.value if result.status else '?'} {dict(result.counts)}"  # fmt: skip
+    _emit(result.to_dict(), text, args)
+    return 0 if result.status is ScheduleRunState.COMPLETED else 1
+
+
+def _cmd_scheduler_status(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        views = scheduler_unit_views(reg, sched.id)
+        runs = sorted(reg.find(ScheduleRunEntity, schedule_id=sched.id), key=lambda r: r.sequence)
+        counts: dict[str, int] = {}
+        for v in views:
+            counts[v.status.value] = counts.get(v.status.value, 0) + 1
+        doc: dict[str, object] = {
+            "schedule_id": sched.id,
+            "name": sched.name,
+            "version": sched.version,
+            "counts": counts,
+            "units": [_unit_row(v) for v in views],
+            "runs": [_run_row(r) for r in runs],
+        }
+        lines = [f"{sched.id} {sched.name} {sched.version}: {counts}"]
+        lines += [f"  {v.key:24} {v.status.value:14} attempts={v.attempts} ref={v.primary_ref}" for v in views]  # fmt: skip
+        _emit(doc, "\n".join(lines), args)
+    return 0
+
+
+def _cmd_scheduler_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        doc = {
+            "id": sched.id,
+            "name": sched.name,
+            "version": sched.version,
+            "spec_id": sched.spec_id,
+            "graph_hash": sched.graph_hash,
+            "engine_version": sched.engine_version,
+            "spec": to_jsonable(sched.spec),
+        }
+        _emit(doc, f"{sched.id} {sched.name} {sched.version} (spec {sched.spec_id})", args)
+    return 0
+
+
+def _cmd_scheduler_graph(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        views = {v.unit_id: v for v in scheduler_unit_views(reg, sched.id)}
+        edges = sorted(
+            (dep, v.key) for v in views.values() for dep in v.depends_on
+        )  # (dependency key, dependent key)
+        doc: dict[str, object] = {
+            "schedule_id": sched.id,
+            "nodes": sorted(v.key for v in views.values()),
+            "edges": [list(e) for e in edges],
+        }
+        _emit(
+            doc,
+            "\n".join(f"{a} -> {b}" for a, b in edges) or "(no dependencies)",
+            args,
+        )
+    return 0
+
+
+def _cmd_scheduler_cancel(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        counts = cancel_schedule(reg, sched.id)
+        _emit(
+            {"schedule_id": sched.id, "cancelled_from": counts},
+            f"cancelled schedule {sched.id}: {counts}",
+            args,
+        )
+    return 0
+
+
+def _cmd_scheduler_retry(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        unit = retry_unit(reg, sched.id, args.unit)
+        _emit(
+            {"schedule_id": sched.id, "unit": args.unit, "status": unit.status.value},
+            f"unit {args.unit} of {sched.id}: {unit.status.value}",
+            args,
+        )
+    return 0
+
+
+def _cmd_scheduler_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sched = scheduler_resolve(reg, args.id)
+        before = {v.key: (v.status, v.primary_ref) for v in scheduler_unit_views(reg, sched.id)}
+        spec = spec_from_schedule(sched)
+    result = run_schedule(
+        _scheduler_open_registry(args.workspace),
+        LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+        _scheduler_open_executor(args.workspace),
+        spec,
+        max_workers=args.max_workers,
+        source_root=Path.cwd(),
+    )
+    with _open(args.workspace) as reg:
+        after = {v.key: (v.status, v.primary_ref) for v in scheduler_unit_views(reg, sched.id)}
+    differences = {
+        k: {"before": [before[k][0].value, before[k][1]], "after": [after[k][0].value, after[k][1]]}
+        for k in before
+        if before.get(k) != after.get(k)
+    }  # fmt: skip
+    env_dependent = sorted(
+        {u.key for u in expand(spec).units if u.kind.value == "RESOURCE"} & set(differences)
+    )
+    doc: dict[str, object] = {
+        "schedule_id": sched.id,
+        "replay_schedule_run_id": result.schedule_run_id,
+        "differences": differences,
+        "environment_dependent": env_dependent,
+        "note": (
+            "RESOURCE units measure the live machine; their differences are expected "
+            "variance, not nondeterminism"
+        ),
+    }
+    deterministic = not (set(differences) - set(env_dependent))
+    _emit(
+        doc,
+        f"replay of {sched.id}: {len(differences)} unit(s) differ ({len(env_dependent)} environment-dependent)",
+        args,
+    )
+    return 0 if deterministic else 1
 
 
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
@@ -3567,6 +3829,70 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_resources_replay)
+
+    sc = group("scheduler", "durable, resumable, dependency-aware orchestration across engines")
+
+    def scfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    p = sc.add_parser(
+        "validate", help="check a schedule spec's DAG (cycles, references); no registry touched"
+    )
+    p.add_argument("spec", help="schedule spec JSON file")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_validate)
+    p = sc.add_parser("expand", help="materialize a spec into explicit, inspectable units")
+    p.add_argument("spec")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_expand)
+    p = sc.add_parser("run", help="execute a schedule's DAG (idempotent, resumable, concurrent)")
+    p.add_argument("spec")
+    p.add_argument("--investigation", help="investigation ID (default: the workspace's only one)")
+    p.add_argument("--max-workers", type=int, help="override the spec's execution policy")
+    p.add_argument(
+        "--dry-run", action="store_true", help="validate and expand only; ZERO experiments run"
+    )
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_run)
+    p = sc.add_parser("status", help="unit statuses, attempts and run history of a schedule")
+    p.add_argument("id", help="schedule ID (sch_...) or a spec_id (ssp_...) prefix")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_status)
+    p = sc.add_parser("inspect", help="a schedule's definition")
+    p.add_argument("id")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_inspect)
+    p = sc.add_parser("graph", help="the dependency graph of a schedule")
+    p.add_argument("id")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_graph)
+    p = sc.add_parser(
+        "resume", help="continue a schedule from its persisted spec; already-SUCCEEDED units are not re-run"
+    )  # fmt: skip
+    p.add_argument("id")
+    p.add_argument("--investigation")
+    p.add_argument("--max-workers", type=int)
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_resume)
+    p = sc.add_parser(
+        "cancel", help="mark every open unit CANCELLED; completed evidence is never touched"
+    )
+    p.add_argument("id")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_cancel)
+    p = sc.add_parser("retry", help="explicitly request a new attempt at a FAILED/TIMED_OUT unit")
+    p.add_argument("id")
+    p.add_argument("--unit", required=True, help="unit key")
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_retry)
+    p = sc.add_parser(
+        "replay", help="re-run a schedule as a new attempt and diff unit outcomes; exit 1 on a "
+        "non-environment-dependent difference"
+    )  # fmt: skip
+    p.add_argument("id")
+    p.add_argument("--max-workers", type=int)
+    scfmt(p)
+    p.set_defaults(func=_cmd_scheduler_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

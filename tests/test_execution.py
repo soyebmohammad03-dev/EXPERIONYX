@@ -46,6 +46,7 @@ from experionyx.provenance import (
     SourceState,
     compare_provenance,
 )
+from experionyx.scheduler.entities import ScheduleRun, ScheduleUnit
 from experionyx.sqlite import SqliteRegistry
 
 
@@ -301,7 +302,16 @@ class FailingRegistry(SqliteRegistry):
         super().add(entity)
 
     def update_status(
-        self, entity: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+        self,
+        entity: (
+            Experiment
+            | Run
+            | FaultExperiment
+            | FailureMode
+            | InteractionAnalysis
+            | ScheduleRun
+            | ScheduleUnit
+        ),
     ) -> None:
         if self.fail_on_final_status and entity.status is RunStatus.COMPLETED:
             raise OSError("simulated persistence failure")

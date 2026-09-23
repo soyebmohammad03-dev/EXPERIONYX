@@ -168,3 +168,20 @@ class BenchmarkRefusal(BenchmarkError):
     def __init__(self, issues: "tuple[object, ...]") -> None:
         self.issues = issues
         super().__init__("benchmark refused: " + "; ".join(str(i) for i in issues))
+
+
+class SchedulerError(ExperionyxError):
+    """Base class for experiment-scheduler problems."""
+
+
+class SchedulerRefusal(SchedulerError):
+    """The schedule definition or its dependency graph is invalid; nothing was executed or
+    recorded. `issues` lists every problem found."""
+
+    def __init__(self, issues: "tuple[object, ...]") -> None:
+        self.issues = issues
+        super().__init__("schedule refused: " + "; ".join(str(i) for i in issues))
+
+
+class ScheduleCancelled(SchedulerError):
+    """A schedule run was cancelled before every unit reached a terminal state."""

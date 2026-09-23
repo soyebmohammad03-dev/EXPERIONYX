@@ -70,6 +70,14 @@ timer resolution. The provenance fingerprint covers the definition and the envir
 so a repeated measurement in the same environment has the same fingerprint and is a new analysis. See
 [resources.md](resources.md).
 
+## Scheduler records (Phase 17)
+
+The scheduler adds an orchestration-level layer of provenance on top of, never instead of, each dispatched
+unit's own Run provenance: the exact compact spec a `Schedule` was materialized from, the expanded and
+resolved `ScheduleUnit` (including the resolved IDs of every unit it depends on), the execution policy a
+`ScheduleRun` actually used, and an append-only `ExecutionAttempt`/`UnitStateTransition` history of every
+attempt and status change. See [scheduler.md](scheduler.md).
+
 ## Calibration analyses (Phase 15)
 
 Every calibration analysis is a Run with its own Provenance record (source revision, environment,

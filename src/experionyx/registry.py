@@ -7,6 +7,7 @@ from experionyx.domain import Entity, Experiment, Run
 from experionyx.failures.entities import FailureMode
 from experionyx.faults.entities import FaultExperiment
 from experionyx.interactions.entities import InteractionAnalysis
+from experionyx.scheduler.entities import ScheduleRun, ScheduleUnit
 
 E = TypeVar("E", bound=Entity)
 
@@ -31,7 +32,16 @@ class Registry(Protocol):
         ...
 
     def update_status(
-        self, entity: Experiment | Run | FaultExperiment | FailureMode | InteractionAnalysis
+        self,
+        entity: (
+            Experiment
+            | Run
+            | FaultExperiment
+            | FailureMode
+            | InteractionAnalysis
+            | ScheduleRun
+            | ScheduleUnit
+        ),
     ) -> None:
         """Persist a legal status transition. Everything except `status` must be unchanged."""
         ...

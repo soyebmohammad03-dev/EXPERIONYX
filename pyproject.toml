@@ -96,6 +96,9 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PT", "RUF", "T20", "S"]
 "tests/interaction_helpers.py" = ["E501"]
 "tests/test_failure*.py" = ["E501", "PT018"]  # dense expectation tables; compound asserts read fine
 "tests/failure_helpers.py" = ["E501"]
+"src/experionyx/scheduler/*.py" = ["E501"]  # dense dispatch/orchestration constructions
+"tests/test_scheduler*.py" = ["E501", "PT018", "C408"]  # dense expected values
+"tests/scheduler_helpers.py" = ["E501"]
 "examples/*" = ["T201", "S311"]  # demo output; random is for illustration, not security
 
 [tool.mypy]

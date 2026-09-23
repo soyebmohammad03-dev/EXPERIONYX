@@ -19,9 +19,10 @@
 14. Model Stress Laboratory (done)
 15. Calibration & Uncertainty Laboratory (done; calibration is measured on stored predictions, not a new score; epistemic/aleatoric decomposition, ensembles and stochastic prediction remain unavailable until an adapter declares them)
 16. Resource & Systems Reliability Laboratory (done; also the scheduled full-project verification; timing is measured on the real execution path and stays environment-specific; GPU memory, enforced resource limits and cross-machine variability remain unavailable)
-17. Evidence Graph (also the next scheduled full-project verification)
-18. Reliability Analysis (statistical, building on profiles and benchmarks)
-19. Experiment Planner
-20. Research validation
-21. Advanced UI/API
-22. Public release / reproducibility package
+17. Experiment Scheduler & Orchestration (done: a durable, resumable, dependency-aware orchestration layer that plans, dispatches and audits collections of experiments across the existing engines; it never re-implements any of them; concurrency is threads-only and a timeout cannot force-kill a dispatch in flight, see [scheduler.md](scheduler.md))
+18. Full-project verification (next scheduled)
+19. Evidence Graph
+20. Reliability Analysis (statistical, building on profiles and benchmarks)
+21. Research validation
+22. Advanced UI/API
+23. Public release / reproducibility package

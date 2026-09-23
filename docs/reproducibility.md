@@ -59,6 +59,15 @@ environment is a new analysis with the same provenance fingerprint. Comparing me
 environments is refused unless explicitly allowed and is then labelled as confounded. See
 [resources.md](resources.md).
 
+## Scheduled experiments (Phase 17)
+
+A `Schedule` reproduces its own exact compact definition (every unit's kind, parameters, dependencies,
+retry policy, resources and timeout); replaying it re-runs each unit through its own engine and compares
+outcomes the same way that engine's own replay would. `RESOURCE` units are excluded from the pass/fail
+verdict of `experionyx scheduler replay`, for the same reason resource timing is excluded above; every
+other unit kind is a deterministic computation given the same seeds and evidence. See
+[scheduler.md](scheduler.md).
+
 ## Calibration analyses (Phase 15)
 
 A calibration analysis is a Run over digest-verified stored predictions; it never loads or calls the model.
