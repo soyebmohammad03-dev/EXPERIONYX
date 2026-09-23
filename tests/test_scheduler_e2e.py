@@ -4,7 +4,6 @@ through the REAL statistical-analysis engine (no model/dataset needed), so succe
 from actually running the target engine, not a stub."""
 
 import threading
-import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -114,31 +113,26 @@ def test_dependent_unit_waits_for_its_dependency_and_sees_real_evidence(workspac
 def test_independent_units_may_execute_concurrently_under_bounded_workers(
     workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two independent units with an artificial delay: with 2 workers both start before either
-    finishes (proving real concurrency), not serially."""
-    starts: list[float] = []
-    lock = threading.Lock()
+    """Two independent units under 2 workers: each blocks on a shared 2-party barrier before
+    finishing. If the scheduler ran them serially, the first would wait on the barrier forever
+    (nothing would ever release it) and the test would time out; a passing result is proof that
+    both were dispatched before either completed, with no dependence on wall-clock thresholds."""
+    barrier = threading.Barrier(2, timeout=10)
     real_dispatch = dispatch_mod.dispatch
 
-    def slow_dispatch(kind, registry, store, executor, investigation_id, parameters, refs, source_root):  # type: ignore[no-untyped-def]  # fmt: skip
-        with lock:
-            starts.append(time.monotonic())
-        time.sleep(0.2)
+    def barrier_dispatch(kind, registry, store, executor, investigation_id, parameters, refs, source_root):  # type: ignore[no-untyped-def]  # fmt: skip
+        barrier.wait()
         return real_dispatch(kind, registry, store, executor, investigation_id, parameters, refs, source_root)  # fmt: skip
 
-    monkeypatch.setattr("experionyx.scheduler.engine.dispatch", slow_dispatch)
+    monkeypatch.setattr("experionyx.scheduler.engine.dispatch", barrier_dispatch)
     spec = ScheduleSpec(
         "parallel", "1.0.0",
         (unit("a", [1, 2, 3]), unit("b", [4, 5, 6])),
         policy=ExecutionPolicy(max_workers=2),
     )  # fmt: skip
-    began = time.monotonic()
     result = run(workspace, spec)
-    elapsed = time.monotonic() - began
     assert result.status is ScheduleRunState.COMPLETED  # type: ignore[attr-defined]
-    assert len(starts) == 2
-    assert max(starts) - min(starts) < 0.15  # both started well within the 0.2s sleep window
-    assert elapsed < 0.35  # ran concurrently, not serially (which would take >= 0.4s)
+    assert dict(result.counts) == {"SUCCEEDED": 2}  # type: ignore[attr-defined]
 
 
 def test_a_failed_dependency_blocks_its_dependents_but_not_independent_units(
