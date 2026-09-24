@@ -75,10 +75,9 @@ def list_protocols(
 def get_leaderboard(protocol_id: str, registry: RegistryDep) -> dict[str, object]:
     v.ref("protocol_id", protocol_id, BenchmarkProtocol.PREFIX)
     registry.get(BenchmarkProtocol, protocol_id)
-    snapshots = sorted(
-        registry.find(LeaderboardSnapshot, protocol_id=protocol_id), key=lambda s: s.id
-    )
-    latest = snapshots[-1] if snapshots else None
+    snapshots = registry.find(LeaderboardSnapshot, protocol_id=protocol_id)
+    # "latest" means most recently created, not lexicographically last content-addressed id.
+    latest = max(snapshots, key=lambda s: (s.created_at, s.id)) if snapshots else None
     entries = registry.find(LeaderboardEntry, snapshot_id=latest.id) if latest else []
     return {
         "snapshot": record(latest) if latest else "unavailable",

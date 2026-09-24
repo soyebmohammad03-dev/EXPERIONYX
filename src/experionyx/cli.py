@@ -5540,8 +5540,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p = viz.add_parser(
         "serve", help="start the FastAPI+static UI (needs: pip install experionyx[viz])"
     )
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8420)
+    p.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
+    p.add_argument("--port", type=int, default=8420, help="bind port (default 8420)")
     p.set_defaults(func=_cmd_viz_serve)
     return parser
 

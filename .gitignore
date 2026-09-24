@@ -52,6 +52,7 @@ node_modules/
 
 # EXPERIONYX workspaces and execution output (registry, artifacts)
 .experionyx/
+.experionyx-*/
 /experiments/
 
 # Local Claude Code settings (attribution preferences etc.)

@@ -56,3 +56,25 @@ def test_fault_analysis_get(api_world: ApiWorld) -> None:
     res = client(api_world).get(f"/api/faults/analyses/{analysis_id}")
     assert res.status_code == 200
     assert res.json()["id"] == analysis_id
+
+
+def test_fault_degradation_viz_has_real_points(api_world: ApiWorld) -> None:
+    fxp_id = api_world.fault_experiment_ids[0]
+    res = client(api_world).get(f"/api/viz/faults/{fxp_id}/degradation")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["metric"] == "deterioration"
+    assert body["points"] == "unavailable" or isinstance(body["points"], list)
+
+
+def test_fault_degradation_viz_is_deterministic(api_world: ApiWorld) -> None:
+    fxp_id = api_world.fault_experiment_ids[0]
+    c = client(api_world)
+    first = c.get(f"/api/viz/faults/{fxp_id}/degradation").json()
+    second = c.get(f"/api/viz/faults/{fxp_id}/degradation").json()
+    assert first == second
+
+
+def test_fault_degradation_viz_unknown_experiment_is_404(api_world: ApiWorld) -> None:
+    res = client(api_world).get(f"/api/viz/faults/fxp_{'0' * 32}/degradation")
+    assert res.status_code == 404

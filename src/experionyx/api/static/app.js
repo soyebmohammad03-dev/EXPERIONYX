@@ -189,7 +189,17 @@ async function viewFaultExperiments() {
 
 async function viewFaultAnalysis(id) {
   const a = await api(`/api/faults/analyses/${id}`);
-  return card(`<h2>Fault Analysis</h2>${traceChain(a.fault_experiment_id, a.run_id, a.id)}${fieldList(a)}`);
+  const chart = await api(`/api/viz/faults/${a.fault_experiment_id}/degradation`);
+  const div = document.createElement("div");
+  if (Array.isArray(chart.points) && chart.points.length) {
+    div.appendChild(charts.lineWithBand(chart.points, chart));
+  } else {
+    div.appendChild(document.createTextNode("degradation curve: unavailable"));
+  }
+  return card(`<h2>Fault Analysis</h2>${traceChain(a.fault_experiment_id, a.run_id, a.id)}
+    <p><em>${esc(chart.comparison)}</em></p>
+    ${div.outerHTML}
+    ${fieldList(a)}`);
 }
 
 // --- drift -----------------------------------------------------------------------------------

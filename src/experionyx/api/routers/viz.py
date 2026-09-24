@@ -8,11 +8,14 @@ from typing import Any
 from fastapi import APIRouter
 
 import experionyx.validation as v
-from experionyx.api.deps import RegistryDep
+from experionyx.api.deps import RegistryDep, StoreDep
 from experionyx.calibration.entities import CalibrationAnalysis, CalibrationResult
 from experionyx.domain import to_jsonable
 from experionyx.drift.entities import DriftAnalysis
+from experionyx.errors import ExperionyxError
 from experionyx.failures.entities import FailureMode
+from experionyx.faults.entities import FaultExperiment
+from experionyx.faults.report import load_analysis, summary_rows
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.stats.entities import StatisticalAnalysis
@@ -145,6 +148,52 @@ def resource_measurements(analysis_id: str, registry: RegistryDep) -> dict[str, 
         comparison="by trial (WARMUP vs MEASURED)",
         points=points,
         provenance_ref=analysis.provenance_fingerprint,
+    )
+
+
+@router.get("/faults/{fault_experiment_id}/degradation")
+def fault_degradation(
+    fault_experiment_id: str, registry: RegistryDep, store: StoreDep
+) -> dict[str, object]:
+    """One point per sweep point: parameter value vs. deterioration, with its CI band and
+    classification -- read straight from the persisted `fault/analysis.json` artifact via the
+    existing `faults.report` helpers. No new statistics are computed here."""
+    v.ref("fault_experiment_id", fault_experiment_id, FaultExperiment.PREFIX)
+    exp = registry.get(FaultExperiment, fault_experiment_id)
+    try:
+        result = load_analysis(registry, store, fault_experiment_id)
+    except ExperionyxError:
+        return _chart(
+            metric="deterioration",
+            unit=None,
+            population=f"fault_experiment:{fault_experiment_id}",
+            comparison="faulted vs. baseline, by sweep point",
+            points="unavailable",
+        )
+    rows = summary_rows(result)
+    points = []
+    for row in rows:
+        if row["deterioration_mean"] is None:
+            continue
+        ci = row["deterioration_ci"]
+        lo, hi = (None, None) if not isinstance(ci, list) else (ci[0], ci[1])
+        points.append(
+            {
+                "x": row["value"] if row["value"] is not None else row["point"],
+                "y": row["deterioration_mean"],
+                "lo": lo,
+                "hi": hi,
+                "classification": row["classification"],
+                "parameter": row["parameter"],
+            }
+        )
+    return _chart(
+        metric="deterioration",
+        unit=None,
+        population=f"fault_experiment:{fault_experiment_id}",
+        comparison=f"faulted vs. baseline={result.baseline_value}, by sweep point",
+        points=points if points else "unavailable",
+        provenance_ref=exp.investigation_id,
     )
 
 
