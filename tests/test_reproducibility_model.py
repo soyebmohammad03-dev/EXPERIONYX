@@ -109,7 +109,7 @@ def test_attempt_run_id_may_be_none_for_targets_without_one() -> None:
 
 def test_attempt_rejects_non_boolean_sources_changed() -> None:
     with pytest.raises(ValidationError):
-        _attempt(sources_changed=1)  # type: ignore[arg-type]
+        _attempt(sources_changed=1)
 
 
 def test_attempt_rejects_a_run_id_with_the_wrong_prefix() -> None:
