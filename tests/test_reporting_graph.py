@@ -5,6 +5,7 @@ import procedures
 from conftest import Lab
 from experionyx.graph.build import construct
 from experionyx.graph.spec import GraphSpec
+from experionyx.graph.taxonomy import NodeKind
 from experionyx.reporting.generator import builtin_template, ensure_template, generate_report
 from experionyx.reporting.spec import ReportSpec
 from experionyx.reporting.taxonomy import ReportType
@@ -21,14 +22,13 @@ def test_a_report_and_its_findings_appear_as_graph_nodes_with_resolved_evidence_
     constructed = construct(lab.registry, GraphSpec("g", "1.0.0"))
     node_kinds = {kind.value for kind, _ref in constructed.nodes}
     assert {"REPORT", "REPORT_FINDING", "REPORT_TEMPLATE"} <= node_kinds
-    assert (
-        "REPORT",
-        result.report_id,
-    ) in constructed.nodes
-    report_node = constructed.nodes[("REPORT", result.report_id)]
+    assert (NodeKind.REPORT, result.report_id) in constructed.nodes
+    report_node = constructed.nodes[(NodeKind.REPORT, result.report_id)]
     assert report_node.resolved is True  # every referenced node the walker found actually exists
 
-    from_report = [e for e in constructed.edges if e.from_key == ("REPORT", result.report_id)]
+    from_report = [
+        e for e in constructed.edges if e.from_key == (NodeKind.REPORT, result.report_id)
+    ]
     assert any(
         e.relation.value == "MEMBER_OF" and e.to_key[0].value == "INVESTIGATION"
         for e in from_report

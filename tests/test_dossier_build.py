@@ -22,14 +22,14 @@ from experionyx.reporting.taxonomy import ReportType
 from experionyx.stats.entities import StatisticalAnalysis
 
 
-def _spec(lab: Lab, **kw: object) -> DossierSpec:
+def _spec(lab: Lab, explicit_evidence: tuple[tuple[str, str], ...] = ()) -> DossierSpec:
     return DossierSpec(
         lab.investigation.id,
         "does it reproduce?",
         DossierSourceKind.INVESTIGATION,
         lab.investigation.id,
-        **kw,
-    )  # type: ignore[arg-type]
+        explicit_evidence,
+    )
 
 
 def test_build_dossier_is_deterministic_against_unchanged_evidence(lab: Lab) -> None:
