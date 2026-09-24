@@ -78,6 +78,16 @@ resolved `ScheduleUnit` (including the resolved IDs of every unit it depends on)
 `ScheduleRun` actually used, and an append-only `ExecutionAttempt`/`UnitStateTransition` history of every
 attempt and status change. See [scheduler.md](scheduler.md).
 
+## Graph construction (Phase 19)
+
+A graph construction is itself a real Run, with its own full Provenance record like any other
+engine: the exact `GraphSpec` and its `spec_id`, the `source_fingerprint` of every registry row
+actually walked, and a `Claim` (backed by `Evidence` pointing at the stored node/edge/summary
+artifacts) stating what was constructed and how many references did not resolve. A graph's own
+bookkeeping (its `ConfigurationRef`/`Experiment`/`Run`/`Claim`) is excluded from what a later
+graph construction treats as evidence, so re-collection converges instead of absorbing every
+previous construction's bookkeeping. See [graph.md](graph.md).
+
 ## Calibration analyses (Phase 15)
 
 Every calibration analysis is a Run with its own Provenance record (source revision, environment,

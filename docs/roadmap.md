@@ -20,8 +20,11 @@
 15. Calibration & Uncertainty Laboratory (done; calibration is measured on stored predictions, not a new score; epistemic/aleatoric decomposition, ensembles and stochastic prediction remain unavailable until an adapter declares them)
 16. Resource & Systems Reliability Laboratory (done; also the scheduled full-project verification; timing is measured on the real execution path and stays environment-specific; GPU memory, enforced resource limits and cross-machine variability remain unavailable)
 17. Experiment Scheduler & Orchestration (done: a durable, resumable, dependency-aware orchestration layer that plans, dispatches and audits collections of experiments across the existing engines; it never re-implements any of them; concurrency is threads-only and a timeout cannot force-kill a dispatch in flight, see [scheduler.md](scheduler.md))
-18. Full-project verification (next scheduled)
-19. Evidence Graph
+18. Full-project verification (done; combined with 19, see below)
+19. Evidence Graph (done: a queryable, deterministic graph connecting every existing entity through
+    typed, versioned relationships derived generically from the registry's own references; edges
+    are provenance/evidence metadata, never an inferred causal claim; unresolved references are
+    kept as explicit nodes, never dropped; see [graph.md](graph.md))
 20. Reliability Analysis (statistical, building on profiles and benchmarks)
 21. Research validation
 22. Advanced UI/API

@@ -193,3 +193,12 @@ degraded in this way", not "the model fails this way in deployment".
   merge into earlier ones. Deprecate the superseded ones explicitly.
 - `LATENCY` and resource effects are not signals.
 - Reproduction replays with whatever adapters and environment are present now.
+
+## Evidence and failure knowledge graph (Phase 19)
+
+`experionyx graph query <snapshot> runs-for-failure-mode <fmd_…>` and `... model-to-failure /
+dataset-to-failure` traverse a constructed `GraphSnapshot` to trace which runs contributed to a
+failure mode, and whether a bounded path exists between a model or dataset and it. These are
+provenance/reference paths through what the registry already recorded, never a re-derivation of
+similarity, clustering or evidence criteria above; a path existing is not itself evidence toward
+`CANDIDATE`/`SUPPORTED`/`CONFIRMED` status. See [graph.md](graph.md).

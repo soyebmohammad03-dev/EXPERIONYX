@@ -76,6 +76,14 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx scheduler cancel <sch_…>` | mark every open unit `CANCELLED`; completed evidence is never touched |
 | `experionyx scheduler retry <sch_…> --unit KEY` | explicitly request a new attempt at a `FAILED`/`TIMED_OUT` unit |
 | `experionyx scheduler replay <sch_…>` | re-run as a new attempt and diff unit outcomes; exits 1 on a non-environment-dependent difference; see [scheduler.md](scheduler.md) |
+| `experionyx graph build SPEC.json [--investigation I]` | construct (or reuse) a graph snapshot over the current registry as a real Run |
+| `experionyx graph list` | list constructed graph definitions |
+| `experionyx graph inspect <grh_… \| gsn_…>` | a graph definition and its snapshots, or one snapshot's node/edge-kind counts |
+| `experionyx graph neighbors <gsn_…> <node> [--direction IN\|OUT\|BOTH]` | direct incoming/outgoing edges of one node (`node` is a `gnd_…` ID or a referenced entity ID) |
+| `experionyx graph path <gsn_…> <a> <b> [--direction --max-depth --max-visited --kind --relation]` | a bounded path between two nodes, if one exists; exit 1 if not found |
+| `experionyx graph query <gsn_…> NAME <node> [--node2 --max-depth --max-visited --kind --relation]` | a named composed query: `evidence-for-claim`, `runs-for-failure-mode`, `analyses-for-run`, `artifacts-for-analysis`, `model-to-failure` / `dataset-to-failure` (needs `--node2`) |
+| `experionyx graph diff <gsn_…> <gsn_…>` | raw added/removed nodes and edges between two snapshots (no verdict) |
+| `experionyx graph replay <gsn_…>` | reconstruct the collect run as a new run and compare; exit 1 unless verified deterministic; see [graph.md](graph.md) |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through

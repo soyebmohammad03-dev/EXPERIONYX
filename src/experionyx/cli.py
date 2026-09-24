@@ -84,6 +84,23 @@ from experionyx.faults.lab import FaultExperimentResult, run_fault_experiment
 from experionyx.faults.library import default_fault_registry
 from experionyx.faults.report import analysis_run_id, load_analysis, read_artifact, summary_rows
 from experionyx.faults.spec import FaultRegistry, FaultScope, FaultSpec, ScopeKind
+from experionyx.graph.diff import diff as graph_diff_snapshots
+from experionyx.graph.engine import GraphRunResult, resolve_graph, resolve_snapshot, run_graph
+from experionyx.graph.engine import replay_check as graph_replay_check
+from experionyx.graph.entities import EvidenceGraph, GraphSnapshot
+from experionyx.graph.query import (
+    SnapshotIndex,
+    analyses_depending_on_run,
+    artifacts_for_analysis,
+    dataset_to_failure_paths,
+    evidence_for_claim,
+    model_to_failure_paths,
+    runs_contributing_to_failure_mode,
+)
+from experionyx.graph.query import TraversalResult as GraphTraversalResult
+from experionyx.graph.spec import GraphQuery, GraphSpec
+from experionyx.graph.taxonomy import NodeKind as GraphNodeKind
+from experionyx.graph.taxonomy import TraversalDirection
 from experionyx.interactions.config import InteractionSpec
 from experionyx.interactions.design import validate_report
 from experionyx.interactions.engine import run_interaction
@@ -1811,6 +1828,191 @@ def _cmd_scheduler_replay(args: argparse.Namespace) -> int:
         args,
     )
     return 0 if deterministic else 1
+
+
+def _load_graph_spec(path: str) -> GraphSpec:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ExperionyxError(f"cannot read graph spec {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ExperionyxError("a graph spec file must be a JSON object")
+    return GraphSpec.from_dict(data)
+
+
+def _graph_row(g: EvidenceGraph) -> dict[str, object]:
+    return {"id": g.id, "name": g.name, "version": g.version, "spec_id": g.spec_id, "engine_version": g.engine_version}  # fmt: skip
+
+
+def _snapshot_row(s: GraphSnapshot) -> dict[str, object]:
+    return {
+        "id": s.id,
+        "graph_id": s.graph_id,
+        "run_id": s.run_id,
+        "node_count": s.node_count,
+        "edge_count": s.edge_count,
+        "unresolved_count": s.unresolved_count,
+        "truncated": s.truncated,
+        "source_fingerprint": s.source_fingerprint,
+    }
+
+
+def _cmd_graph_build(args: argparse.Namespace) -> int:
+    spec = _load_graph_spec(args.spec)
+    with _open(args.workspace) as reg:
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        result: GraphRunResult = run_graph(
+            reg, store, _executor(reg, args.workspace), spec, investigation_id=args.investigation
+        )
+        doc: dict[str, object] = {
+            "graph_id": result.graph_id,
+            "snapshot_id": result.snapshot_id,
+            "run_id": result.run_id,
+            "status": result.status.value if result.status else None,
+            "already_built": result.already_built,
+        }
+        if result.snapshot_id is not None:
+            doc["snapshot"] = _snapshot_row(reg.get(GraphSnapshot, result.snapshot_id))
+        text = f"graph {result.graph_id}: snapshot {result.snapshot_id} ({'reused' if result.already_built else 'built'})"  # fmt: skip
+        _emit(doc, text, args)
+    return 0 if result.snapshot_id is not None else 1
+
+
+def _cmd_graph_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        graphs = reg.find(EvidenceGraph)
+        _emit(
+            {"graphs": [_graph_row(g) for g in graphs]},
+            "\n".join(f"{g.id} {g.name} {g.version} (spec {g.spec_id})" for g in graphs),
+            args,
+        )
+    return 0
+
+
+def _cmd_graph_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        if args.id.startswith(EvidenceGraph.PREFIX + "_") or not args.id.startswith(GraphSnapshot.PREFIX + "_"):  # fmt: skip
+            g = resolve_graph(reg, args.id)
+            snaps = reg.find(GraphSnapshot, graph_id=g.id)
+            doc: dict[str, object] = {**_graph_row(g), "spec": to_jsonable(g.spec), "snapshots": [_snapshot_row(s) for s in snaps]}  # fmt: skip
+            _emit(doc, f"{g.id} {g.name} {g.version}: {len(snaps)} snapshot(s)", args)
+        else:
+            s = resolve_snapshot(reg, args.id)
+            idx = SnapshotIndex(reg, s.id)
+            doc = {
+                **_snapshot_row(s),
+                "summary": to_jsonable(s.summary),
+                "nodes_by_kind": _count_by(n.node_kind.value for n in idx.nodes.values()),
+                "edges_by_relation": _count_by(e.relation.value for e in idx.edges.values()),
+            }
+            _emit(doc, f"{s.id}: {s.node_count} node(s), {s.edge_count} edge(s), {s.unresolved_count} unresolved", args)  # fmt: skip
+    return 0
+
+
+def _count_by(values: Any) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for v in values:
+        out[v] = out.get(v, 0) + 1
+    return out
+
+
+def _graph_query_parser_kwargs(args: argparse.Namespace) -> GraphQuery:
+    return GraphQuery(
+        max_depth=args.max_depth,
+        max_visited=args.max_visited,
+        kinds=tuple(GraphNodeKind(k) for k in (args.kind or [])),
+        relations=tuple(args.relation or []),
+    )
+
+
+def _resolve_node(idx: SnapshotIndex, ref: str) -> str:
+    """`ref` is a graph node ID (gnd_...) or a referenced entity ID (e.g. run_...)."""
+    if ref in idx.nodes:
+        return ref
+    for kind in GraphNodeKind:
+        node = idx.find_by_ref(kind, ref)
+        if node is not None:
+            return node.id
+    raise ExperionyxError(f"no node in this snapshot references {ref!r}")
+
+
+def _emit_traversal(result: GraphTraversalResult, args: argparse.Namespace, label: str) -> int:
+    text = f"{label}: {len(result.nodes)} node(s), {len(result.edges)} edge(s), truncated={result.truncated}"  # fmt: skip
+    _emit(result.to_dict(), text, args)
+    return 0
+
+
+def _cmd_graph_neighbors(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        s = resolve_snapshot(reg, args.snapshot)
+        idx = SnapshotIndex(reg, s.id)
+        node_id = _resolve_node(idx, args.node)
+        direction = TraversalDirection(args.direction)
+        result = idx.neighbors(node_id, direction)
+        return _emit_traversal(result, args, f"neighbors of {args.node}")
+
+
+def _cmd_graph_path(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        s = resolve_snapshot(reg, args.snapshot)
+        idx = SnapshotIndex(reg, s.id)
+        a, b = _resolve_node(idx, args.a), _resolve_node(idx, args.b)
+        query = _graph_query_parser_kwargs(args)
+        direction = TraversalDirection(args.direction)
+        result = idx.path(a, b, direction, query)
+        _emit(result.to_dict(), f"path {args.a} -> {args.b}: {'found' if result.found else 'not found'} (truncated={result.truncated})", args)  # fmt: skip
+        return 0 if result.found else 1
+
+
+_GRAPH_QUERIES: dict[str, Any] = {
+    "evidence-for-claim": evidence_for_claim,
+    "runs-for-failure-mode": runs_contributing_to_failure_mode,
+    "analyses-for-run": analyses_depending_on_run,
+    "artifacts-for-analysis": artifacts_for_analysis,
+}
+
+
+def _cmd_graph_query(args: argparse.Namespace) -> int:
+    if args.name in _GRAPH_QUERIES:
+        with _open(args.workspace) as reg:
+            s = resolve_snapshot(reg, args.snapshot)
+            idx = SnapshotIndex(reg, s.id)
+            node_id = _resolve_node(idx, args.node)
+            query = _graph_query_parser_kwargs(args)
+            result = _GRAPH_QUERIES[args.name](idx, node_id, query)
+            return _emit_traversal(result, args, f"{args.name} {args.node}")
+    if args.name in ("model-to-failure", "dataset-to-failure"):
+        if args.node2 is None:
+            raise ExperionyxError(f"{args.name} needs --node2 (the failure mode ID)")
+        with _open(args.workspace) as reg:
+            s = resolve_snapshot(reg, args.snapshot)
+            idx = SnapshotIndex(reg, s.id)
+            query = _graph_query_parser_kwargs(args)
+            fn = model_to_failure_paths if args.name == "model-to-failure" else dataset_to_failure_paths  # fmt: skip
+            result = fn(idx, args.node, args.node2, query)
+            _emit(result.to_dict(), f"{args.name} {args.node} -> {args.node2}: {'found' if result.found else 'not found'}", args)  # fmt: skip
+            return 0 if result.found else 1
+    raise ExperionyxError(f"unknown query {args.name!r}; choose one of {sorted({*_GRAPH_QUERIES, 'model-to-failure', 'dataset-to-failure'})}")  # fmt: skip
+
+
+def _cmd_graph_diff(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        a = resolve_snapshot(reg, args.a)
+        b = resolve_snapshot(reg, args.b)
+        result = graph_diff_snapshots(reg, a.id, b.id)
+        text = f"diff {a.id} -> {b.id}: +{len(result.added_nodes)}/-{len(result.removed_nodes)} node(s), +{len(result.added_edges)}/-{len(result.removed_edges)} edge(s)"  # fmt: skip
+        _emit(result.to_dict(), text, args)
+    return 0
+
+
+def _cmd_graph_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        s = resolve_snapshot(reg, args.id)
+        out = graph_replay_check(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), s.id
+        )  # fmt: skip
+        _dump(out)
+        return 0 if out["deterministic"] is True else 1
 
 
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
@@ -3893,6 +4095,69 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-workers", type=int)
     scfmt(p)
     p.set_defaults(func=_cmd_scheduler_replay)
+
+    gr = group("graph", "queryable evidence/failure knowledge graph over every existing entity")
+
+    def gfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    def gquery_bounds(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--max-depth", type=int, default=12)
+        q.add_argument("--max-visited", type=int, default=5000)
+        q.add_argument("--kind", action="append", help="restrict traversal to this NodeKind (repeatable)")  # fmt: skip
+        q.add_argument("--relation", action="append", help="restrict traversal to this RelationType (repeatable)")  # fmt: skip
+
+    p = gr.add_parser("build", help="construct (or reuse) a graph snapshot over the current registry")  # fmt: skip
+    p.add_argument("spec", help="graph spec JSON file")
+    p.add_argument("--investigation", help="investigation ID (default: the workspace's only one, or the spec's)")  # fmt: skip
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_build)
+    p = gr.add_parser("list", help="list constructed graph definitions")
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_list)
+    p = gr.add_parser("inspect", help="a graph definition (grh_) or a snapshot (gsn_)")
+    p.add_argument("id")
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_inspect)
+    p = gr.add_parser("neighbors", help="direct incoming/outgoing edges of one node")
+    p.add_argument("snapshot", help="snapshot ID (gsn_...) or a spec_id prefix")
+    p.add_argument("node", help="a graph node ID (gnd_...) or a referenced entity ID")
+    p.add_argument("--direction", choices=["IN", "OUT", "BOTH"], default="BOTH")
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_neighbors)
+    p = gr.add_parser("path", help="a path between two nodes, if one exists within the bounds")
+    p.add_argument("snapshot")
+    p.add_argument("a")
+    p.add_argument("b")
+    p.add_argument("--direction", choices=["IN", "OUT", "BOTH"], default="OUT")
+    gquery_bounds(p)
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_path)
+    p = gr.add_parser(
+        "query",
+        help=(
+            "a named composed query: evidence-for-claim, runs-for-failure-mode, "
+            "analyses-for-run, artifacts-for-analysis, model-to-failure, dataset-to-failure"
+        ),
+    )
+    p.add_argument("snapshot")
+    p.add_argument("name")
+    p.add_argument("node", help="the seed node (ID or referenced entity ID)")
+    p.add_argument("--node2", help="second node ID, for model-to-failure / dataset-to-failure")
+    gquery_bounds(p)
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_query)
+    p = gr.add_parser("diff", help="raw added/removed nodes and edges between two snapshots")
+    p.add_argument("a")
+    p.add_argument("b")
+    gfmt(p)
+    p.set_defaults(func=_cmd_graph_diff)
+    p = gr.add_parser(
+        "replay",
+        help="reconstruct a snapshot as a NEW run and compare; exit 1 unless verified deterministic",
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_graph_replay)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

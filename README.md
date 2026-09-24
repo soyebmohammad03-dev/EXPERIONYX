@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 17 (experiment scheduler & orchestration).** The typed domain model, a local SQLite registry,
+> **Status: Phase 19 (evidence and failure knowledge graph).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -127,6 +127,14 @@ See [docs/architecture.md](docs/architecture.md) and
   already-succeeded work; concurrency is bounded and deterministic; dry-run executes zero experiments; every
   plan, dispatch, retry, skip, block and outcome is recorded and auditable. No hidden work, no fabricated
   resource guarantees, no forced kill of a running dispatch.
+- Evidence and failure knowledge graph ([docs/graph.md](docs/graph.md)): a deterministic, queryable graph
+  connecting every existing entity (models, datasets, splits, experiments, runs, faults, stresses, temporal
+  windows, data quality, calibration, resources, failure signals/clusters/modes, statistics, interactions,
+  reliability profiles, benchmarks, claims, evidence, artifacts, scheduler units) through a closed, versioned
+  relationship vocabulary derived generically from the registry's own references. Edges are
+  provenance/evidence metadata, never an inferred causal claim; unresolved references are kept as explicit
+  nodes, never dropped; construction is a real, replayable Run; every traversal is bounded and reports
+  truncation. No universal graph or reliability score.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

@@ -68,6 +68,14 @@ verdict of `experionyx scheduler replay`, for the same reason resource timing is
 other unit kind is a deterministic computation given the same seeds and evidence. See
 [scheduler.md](scheduler.md).
 
+## Graph construction (Phase 19)
+
+`experionyx graph replay` reconstructs the original collect Run as a new Run and compares every
+stored artifact (spec, nodes, edges, summary) byte-for-byte. If the registry's content changed
+since the snapshot was collected, the source fingerprint differs and this is reported as
+`sources_changed`, never as nondeterminism — replay cannot judge determinism when its inputs moved
+between the two runs. See [graph.md](graph.md).
+
 ## Calibration analyses (Phase 15)
 
 A calibration analysis is a Run over digest-verified stored predictions; it never loads or calls the model.

@@ -51,6 +51,7 @@ from experionyx.failures.entities import (
 )
 from experionyx.failures.taxonomy import NodeKind
 from experionyx.faults.entities import FaultAnalysis, FaultExperiment, FaultTrial
+from experionyx.graph.entities import EvidenceGraph, GraphEdge, GraphNode, GraphSnapshot
 from experionyx.hashing import canonical_json, content_hash
 from experionyx.interactions.entities import (
     InteractionAnalysis,
@@ -79,7 +80,8 @@ from experionyx.stress.entities import StressAnalysis, StressTrial
 # 14: calibration analyses and per-context calibration results.
 # 15: resource analyses and per-pass resource trials.
 # 16: schedules, schedule runs, schedule units, execution attempts and unit state transitions.
-DB_SCHEMA_VERSION = 16
+# 17: evidence graphs, graph snapshots, graph nodes and graph edges.
+DB_SCHEMA_VERSION = 17
 
 
 @dataclass(frozen=True)
@@ -370,6 +372,29 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("sequence", "from_status", "to_status"),
         since=16,
     ),
+    EvidenceGraph: _Spec("evidence_graphs", plain=("spec_id",), since=17),
+    GraphSnapshot: _Spec(
+        "graph_snapshots",
+        refs=(("graph_id", EvidenceGraph), ("investigation_id", Investigation), ("run_id", Run)),
+        plain=("source_fingerprint",),
+        since=17,
+    ),
+    GraphNode: _Spec(
+        "graph_nodes",
+        refs=(("snapshot_id", GraphSnapshot),),
+        plain=("node_kind", "ref_id"),
+        since=17,
+    ),
+    GraphEdge: _Spec(
+        "graph_edges",
+        refs=(
+            ("snapshot_id", GraphSnapshot),
+            ("from_node_id", GraphNode),
+            ("to_node_id", GraphNode),
+        ),
+        plain=("relation",),
+        since=17,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -531,6 +556,13 @@ def _migrate_15_to_16(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_16_to_17(conn: sqlite3.Connection) -> None:
+    """Phase 17-18: evidence graphs, graph snapshots, graph nodes and graph edges (new tables
+    only)."""
+    for statement in _ddl(upto=17, since=17):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -547,6 +579,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     13: _migrate_13_to_14,
     14: _migrate_14_to_15,
     15: _migrate_15_to_16,
+    16: _migrate_16_to_17,
 }
 
 
