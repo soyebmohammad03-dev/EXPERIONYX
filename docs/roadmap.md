@@ -45,5 +45,19 @@
     benchmark/reliability-profile/graph scope, explicit evidence-sufficiency analysis (gaps,
     conflicts, provenance/reproducibility gaps, never hidden), preserved rather than resolved
     conflicting evidence, and immutable content-addressed snapshots; see [dossier.md](dossier.md))
-23. Advanced UI/API
-24. Public release / reproducibility package
+23. Advanced UI/API (done: a read-only FastAPI surface (`src/experionyx/api/`) and a small
+    hand-written vanilla-JS SPA over every existing engine's own read APIs — investigations,
+    reliability, failures, faults, drift, statistics, benchmark/leaderboard, reproducibility, the
+    evidence graph, reports and dossiers. Every router calls only `get`/`find`/`exists` or a
+    subsystem's own `search`/`compare`/`document` method; no analysis is recomputed, no aggregate
+    reliability score or "best model" verdict is ever introduced, missing evidence is always
+    rendered as an explicit "unavailable" marker, and every list/graph endpoint is bounded and
+    paginated. Run with `experionyx viz serve`; see [visualization.md](visualization.md) and
+    [api.md](api.md))
+24. Public release / reproducibility package (done: final architecture/determinism/provenance/
+    scientific-integrity/security audit against the whole pipeline; documentation finalized
+    (README, this roadmap, [visualization.md](visualization.md), [api.md](api.md),
+    [limitations.md](limitations.md)); a canonical, real, non-mocked end-to-end example
+    (`examples/end_to_end_workflow.py`) covering registration through report/dossier/snapshot/UI
+    inspection/Markdown export; no schema change was needed for this phase, the API is a read-only
+    layer over schema v21)

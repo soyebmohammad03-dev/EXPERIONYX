@@ -2,12 +2,16 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 22 (research reporting + evidence dossiers).** The typed domain model, a local SQLite registry,
-> an execution engine that records provenance and artifact digests, framework-agnostic model and
-> dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
-> (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
-> treatment runs; degradation with direction-aware metrics) and a deterministic failure registry and discovery pipeline (signals, similarity, clustering, evidence criteria, reproduction check, lifecycle) exist. A rigorous fault interaction analysis engine (four-cell additive contrast, trial-level bootstrap, order effects, per-sample and failure-mode analysis) exists. Evidence-first reliability profiles summarize what has been observed about an evaluated system without a score or ranking. Versioned, deterministic robustness benchmarks with an explicit coverage account exist. Drift, general statistics and reports are
-> not implemented yet. Everything below marked *planned* is an architecture target, not a feature.
+EXPERIONYX is an AI experimental forensics and reliability laboratory for controlled
+experimentation, failure discovery, statistical analysis, reproducibility, provenance, and
+evidence-backed research reporting.
+
+> **Status: Phase 23–24 (visualization/analysis API+UI and final release hardening) complete.**
+> Every subsystem listed under "What exists today" below is implemented, tested, and reachable
+> both from the CLI and from a read-only HTTP API + small vanilla-JS UI
+> (`experionyx viz serve`, see [docs/visualization.md](docs/visualization.md) and
+> [docs/api.md](docs/api.md)). See [docs/roadmap.md](docs/roadmap.md) for the phase-by-phase
+> history and [docs/limitations.md](docs/limitations.md) for what is genuinely still bounded.
 
 ## Problem
 
@@ -17,18 +21,54 @@ and conclusions are rarely traceable to observations. EXPERIONYX aims to be a la
 investigating the behavior, failure modes, reproducibility, provenance and longitudinal
 reliability of AI/ML systems, with every conclusion traceable to real measurements.
 
+## The research lifecycle
+
+```
+register model/dataset → run baseline → apply controlled fault
+  → discover/analyze failure → statistical analysis → reliability evidence
+  → inspect graph → reproducibility check → benchmark (optional)
+  → generate report → build evidence dossier → immutable snapshot
+  → inspect via API/UI → export Markdown
+```
+
+`examples/end_to_end_workflow.py` runs this exact sequence against real (small, deterministic)
+data — no mocks — and prints the API/UI paths a researcher would open to inspect each result:
+
+```bash
+pip install -e ".[dev,sklearn,faults,viz]"
+python examples/end_to_end_workflow.py
+experionyx --workspace .experionyx-example viz serve   # then open http://127.0.0.1:8420/
+```
+
+## What EXPERIONYX does not claim to solve
+
+- It does not decide whether one model is "better" than another. Benchmarks and reliability
+  profiles never produce a composite score, ranking, or "best model" verdict — see
+  [leaderboard.md](docs/leaderboard.md) and [reliability.md](docs/reliability.md).
+  Comparisons are protocol-specific, metric-specific, and always show their own scope.
+- It does not infer causation from an observational comparison, a fault effect, or a failure
+  cluster — see [observation-vs-conclusion.md](docs/observation-vs-conclusion.md). A finding is a
+  statement about what was measured, never a claim about why.
+- It does not treat missing or unavailable evidence as a negative result; unavailable is a
+  distinct, explicit status everywhere in the system, never a `0` or a silent omission.
+- It does not promise bit-for-bit reproducibility the underlying platform cannot guarantee, and it
+  does not measure portable, cross-machine resource/timing numbers — see
+  [reproducibility.md](docs/reproducibility.md) and [resources.md](docs/resources.md).
+- It is not a GPU-scale or cluster-scale system: it is laptop-first, CPU-first, and built around
+  small public datasets. See [docs/limitations.md](docs/limitations.md) for the complete list.
+
 ## Philosophy
 
 Evidence over assertion; reproducibility over convenience; negative results are valid;
 no fabricated evidence; statistical humility; explicit uncertainty; resource awareness.
 See [docs/methodology.md](docs/methodology.md).
 
-## Architecture target (planned)
+## Architecture
 
 ```
 MODEL → BASELINE → AUTOMATED AUTOPSY → CONTROLLED FAULT INJECTION → FAILURE DISCOVERY
 → EXPERIMENT TRACE → REPRODUCIBILITY ANALYSIS → LONGITUDINAL DRIFT ANALYSIS
-→ STATISTICAL EVIDENCE → RELIABILITY ANALYSIS → EVIDENCE-BACKED DOSSIER
+→ STATISTICAL EVIDENCE → RELIABILITY ANALYSIS → EVIDENCE-BACKED DOSSIER → VISUALIZATION/API
 ```
 
 See [docs/architecture.md](docs/architecture.md) and
@@ -162,9 +202,15 @@ See [docs/architecture.md](docs/architecture.md) and
   reproducibility gaps — never hidden); conflicting statistical evidence is preserved and
   cross-referenced, never auto-resolved; immutable, content-addressed snapshots that a later
   experiment cannot silently alter.
+- Visualization / analysis API+UI ([docs/visualization.md](docs/visualization.md),
+  [docs/api.md](docs/api.md)): a read-only FastAPI surface plus a small hand-written vanilla-JS SPA
+  over every engine above's own read APIs, served with `experionyx viz serve`. Every route calls
+  an existing `get`/`find`/`search`/`compare`/`document` method — no analysis is recomputed here,
+  no aggregate reliability score or "best model" verdict is ever introduced, missing evidence is
+  always an explicit "unavailable", and every list/graph view is bounded and paginated.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
-- Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)
+- Tests, Ruff, strict mypy, and a GitHub Actions CI workflow (Python 3.11 and 3.12)
 
 ## Hardware philosophy
 
@@ -174,11 +220,12 @@ resumable and bounded-parallel execution. No paid APIs, GPUs or clusters in the 
 ## Development
 
 Requires Python 3.11+. The core has no runtime dependencies; frameworks are extras:
-`pip install -e ".[sklearn]"`, `".[torch]"`, `".[faults]"` (numpy, for fault injection); add `dev` for the test tools.
+`pip install -e ".[sklearn]"`, `".[torch]"`, `".[faults]"` (numpy, for fault injection),
+`".[viz]"` (FastAPI + uvicorn, for `experionyx viz serve`); add `dev` for the test tools.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,sklearn,torch,faults]"
+pip install -e ".[dev,sklearn,torch,faults,viz]"
 pytest && ruff check . && ruff format --check . && mypy
 ```
 

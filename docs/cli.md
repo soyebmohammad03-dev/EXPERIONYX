@@ -115,6 +115,7 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx dossier snapshot <dsr_…>` | freeze a dossier's current evidence into an immutable snapshot |
 | `experionyx dossier validate <dsr_…>` | list unresolved sufficiency findings; exit 1 if any evidence is unavailable or stale |
 | `experionyx dossier export <dsr_…> [--output PATH]` | render a dossier to Markdown; see [dossier.md](dossier.md) |
+| `experionyx viz serve [--host H --port P]` | serve the read-only visualization/analysis API+UI over the workspace (needs `pip install experionyx[viz]`); see [visualization.md](visualization.md) and [api.md](api.md) |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through
@@ -126,4 +127,26 @@ experionyx status
 experionyx execute <experiment-id> --seed 1 --procedure examples.basic_experiment:sample_mean
 experionyx provenance <run-id>
 experionyx replay <run-id>
+```
+
+## Workflow: experiment to evidence to report/dossier to UI
+
+The full lifecycle, using only real subcommands (`examples/end_to_end_workflow.py` runs the
+equivalent through the Python API and produces the ids these commands need):
+
+```bash
+experionyx status                                                # investigation/experiment/run state
+experionyx fault run FAULT_SPEC.json                             # controlled fault, real degradation
+experionyx fail discover --investigation inv_…                   # failure signals/clusters/modes
+experionyx reliability profile PROFILE_SPEC.json                 # evidence-first reliability
+experionyx graph collect --investigation inv_…                   # snapshot the evidence graph
+experionyx reproduce run RUN <run-id> --mode PROVENANCE_ONLY
+experionyx report generate STANDARD --investigation inv_…
+experionyx dossier build --investigation inv_… --question "..."
+experionyx dossier snapshot <dsr_…>                               # immutable
+
+pip install -e ".[viz]"
+experionyx viz serve                                              # http://127.0.0.1:8420/
+experionyx report export <rpt_…> --output report.md
+experionyx dossier export <dsr_…> --output dossier.md
 ```
