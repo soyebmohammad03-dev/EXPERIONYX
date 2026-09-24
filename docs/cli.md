@@ -59,6 +59,15 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx benchmark list\|inspect\|coverage <bmk_…\|brs_…>` | search definitions; a definition or result with its section statuses; the coverage account |
 | `experionyx benchmark compare <brs_…> <brs_…>` | raw differences between two results of an identical protocol (refused otherwise; no winner) |
 | `experionyx benchmark replay <brs_…>` | replay the collect run as a new run and compare; exit 1 unless verified deterministic |
+| `experionyx benchmark protocol SPEC.json` | register a spec's model-independent protocol identity (`bpr_…`) |
+| `experionyx benchmark submit SPEC.json --protocol bpr_…` | run a full benchmark and submit its evidence to a registered protocol; exit 2 if the spec does not match the protocol |
+| `experionyx leaderboard list` | list registered benchmark protocols |
+| `experionyx leaderboard inspect <bpr_…\|bsb_…\|lbs_…\|lbe_…>` | a protocol, submission, snapshot or entry |
+| `experionyx leaderboard snapshot <bpr_…> [--metric M… --require-complete-coverage --require-reproduction]` | build (or reuse) an immutable snapshot of every qualifying submission to a protocol |
+| `experionyx leaderboard compare <bsb_…> <bsb_…>` | protocol-constrained raw comparison of two submissions (refused if protocols differ; no winner) |
+| `experionyx leaderboard correct <sta_…>… [--method NONE\|BONFERRONI\|BENJAMINI_HOCHBERG --alpha A]` | multiple-comparison correction over an explicit family of registered stats analyses |
+| `experionyx leaderboard verify <bsb_…>` | re-hash a submission's underlying benchmark run artifacts |
+| `experionyx leaderboard replay <lbs_…>` | rebuild a snapshot from current evidence; exit 1 if the evidence changed; see [leaderboard.md](leaderboard.md) |
 | `experionyx stats compare\|bootstrap\|proportion\|correct …` | deterministic, recorded statistics over inline values, interaction trials, fault trials or run artifacts; see [statistics.md](statistics.md) |
 | `experionyx stress families\|validate\|run\|sweep\|list\|inspect\|compare\|replay …` | controlled model stress (input, parameter, threshold, evaluation condition) against a validated baseline; `run`/`sweep` exit 3 if evidence is incomplete, `replay` exits 1 on any difference; see [stress.md](stress.md) |
 | `experionyx calibration validate\|list\|inspect\|evaluate\|compare\|replay …` | calibration and uncertainty of a baseline run's stored predictions (top-label / classwise reliability, ECE/MCE/Brier/log loss, post-hoc Platt or isotonic with a separate calibration split or run, Wilson and bootstrap uncertainty, explicit slices/windows/stress analyses); `validate --preflight` and `evaluate` refuse unsupported baselines and leaky calibration data before anything runs, `evaluate` exits 3 if evidence is insufficient, unavailable or invalid, `compare` recomputes and stores nothing, `replay` exits 1 on any difference; see [calibration.md](calibration.md) |

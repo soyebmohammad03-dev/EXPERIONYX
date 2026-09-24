@@ -265,7 +265,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +303,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -344,7 +344,7 @@ def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
         assert new
         assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "statistical_analyses" in tables
         assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
@@ -385,7 +385,7 @@ def test_every_prior_version_migrates_to_slice_tables_and_accepts_slices(
         assert created2
         assert again.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"slices", "slice_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM slices").fetchone()[0] == 2
@@ -435,7 +435,7 @@ def test_every_prior_version_migrates_to_drift_tables_and_accepts_windows(
         )
         assert created3 and other.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"temporal_windows", "drift_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM temporal_windows").fetchone()[0] == 2
@@ -493,7 +493,7 @@ def test_every_prior_version_migrates_to_quality_tables_and_accepts_records(
         assert QualityRegistry(reg).analyses() == []  # the new table exists and is empty
         assert reg.find(QualityCheck) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"quality_analyses", "quality_checks"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM quality_analyses").fetchone()[0] == 0
@@ -529,7 +529,7 @@ def test_every_prior_version_migrates_to_stress_tables_and_keeps_its_data(
         assert StressRegistry(reg).analyses() == []  # the new tables exist and are empty
         assert reg.find(StressTrial) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"stress_analyses", "stress_trials"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM stress_analyses").fetchone()[0] == 0
@@ -566,7 +566,7 @@ def test_every_prior_version_migrates_to_calibration_tables_and_keeps_its_data(
         assert CalibrationRegistry(reg).analyses() == []  # the new tables exist and are empty
         assert reg.find(CalibrationResult) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"calibration_analyses", "calibration_results"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM calibration_analyses").fetchone()[0] == 0
@@ -616,7 +616,7 @@ def test_every_prior_version_migrates_to_resource_tables_and_keeps_its_data(
         assert reg.get(ResourceAnalysis, a.id) == a and reg.get(ResourceTrial, tr.id) == tr
         assert a.id == ResourceAnalysis.from_dict(a.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"resource_analyses", "resource_trials"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM resource_analyses").fetchone()[0] == 1
@@ -709,7 +709,7 @@ def test_every_prior_version_migrates_to_schedule_tables_and_keeps_its_data(
         assert reg.get(ExecutionAttempt, attempt.id) == attempt
         assert sched.id == Schedule.from_dict(sched.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "schedules",
@@ -798,7 +798,7 @@ def test_every_prior_version_migrates_to_graph_tables_and_keeps_its_data(
         assert reg.get(GraphEdge, edge.id) == edge
         assert gr.id == EvidenceGraph.from_dict(gr.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"evidence_graphs", "graph_snapshots", "graph_nodes", "graph_edges"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM evidence_graphs").fetchone()[0] == 1
@@ -866,7 +866,7 @@ def test_every_prior_version_migrates_to_reproduction_tables_and_keeps_its_data(
         again = ReproductionAttempt.from_dict(attempt.to_dict())
         assert attempt.id == again.id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 18
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "reproduction_attempts" in tables
         assert raw.execute("SELECT COUNT(*) FROM reproduction_attempts").fetchone()[0] == 1
@@ -905,5 +905,157 @@ def test_a_reproduction_attempt_needs_its_investigation_to_exist(tmp_path: Path)
         "run_" + "9" * 32, None, None, None, ComparisonOutcome.EQUAL, False, (), (), {}, {},
         None, "1.0.0", when,
     )  # fmt: skip
+    with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
+        reg.add(orphan)
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18])
+def test_every_prior_version_migrates_to_leaderboard_tables_and_keeps_its_data(
+    tmp_path: Path, version: int
+) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.adapters.metadata import DatasetMetadata, ModelMetadata
+    from experionyx.adapters.records import RegisteredDataset, RegisteredModel
+    from experionyx.benchmark.entities import Benchmark, BenchmarkResult
+    from experionyx.benchmark.taxonomy import CoverageStatus
+    from experionyx.leaderboard.entities import (
+        BenchmarkProtocol,
+        BenchmarkSubmission,
+        LeaderboardEntry,
+        LeaderboardSnapshot,
+    )
+    from experionyx.leaderboard.taxonomy import ReproducibilityState
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    t0 = datetime(2026, 9, 24, tzinfo=UTC)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        assert reg.find(BenchmarkProtocol) == []  # the new tables exist and are empty
+
+        dset_meta = DatasetMetadata("pure", "1.0.0", "tabular", "1.0.0", DIGEST)
+        dataset = RegisteredDataset("d", dset_meta, t0)
+        reg.add(dataset)
+        mdl = RegisteredModel(
+            "m",
+            ModelMetadata(
+                "pure",
+                "1.0.0",
+                "sklearn",
+                "sklearn.linear_model.LogisticRegression",
+                "1.0.0",
+                DIGEST,
+            ),
+            t0,
+        )
+        reg.add(mdl)
+        protocol = BenchmarkProtocol("leaderboard-demo", "1.0.0", DIGEST, dataset.id, "1.0.0", t0)
+        reg.add(protocol)  # the new tables work immediately after the stepwise migration
+        bmk = Benchmark(
+            "leaderboard-demo",
+            "1.0.0",
+            "bsp_" + "1" * 32,
+            {"model": mdl.id},
+            DIGEST,
+            "1.0.0",
+            mdl.id,
+            dataset.id,
+            t0,
+        )
+        reg.add(bmk)
+        brs = BenchmarkResult(
+            bmk.id,
+            made["inv"].id,
+            made["run"].id,
+            DIGEST,
+            DIGEST,
+            CoverageStatus.COMPLETE,
+            {},
+            {"baseline": {"metrics": []}},
+            t0,
+        )
+        reg.add(brs)
+        submission = BenchmarkSubmission(protocol.id, made["inv"].id, mdl.id, bmk.id, brs.id, t0)
+        reg.add(submission)
+        snapshot = LeaderboardSnapshot(
+            protocol.id,
+            made["inv"].id,
+            "1.0.0",
+            (),
+            {},
+            {},
+            (submission.id,),
+            {},
+            DIGEST,
+            t0,
+        )
+        reg.add(snapshot)
+        entry = LeaderboardEntry(
+            snapshot.id,
+            submission.id,
+            mdl.id,
+            {},
+            {},
+            ReproducibilityState.UNAVAILABLE,
+            t0,
+        )
+        reg.add(entry)
+
+        assert reg.get(BenchmarkProtocol, protocol.id) == protocol
+        assert reg.get(BenchmarkSubmission, submission.id) == submission
+        assert reg.get(LeaderboardSnapshot, snapshot.id) == snapshot
+        assert reg.get(LeaderboardEntry, entry.id) == entry
+        again = BenchmarkProtocol.from_dict(protocol.to_dict())
+        assert protocol.id == again.id  # deterministic identity
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        expected_tables = {
+            "benchmark_protocols",
+            "benchmark_submissions",
+            "leaderboard_snapshots",
+            "leaderboard_entries",
+        }
+        assert expected_tables <= tables
+        assert raw.execute("SELECT COUNT(*) FROM leaderboard_entries").fetchone()[0] == 1
+        assert raw.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] >= 1
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            raw.execute("UPDATE benchmark_protocols SET payload = '{}'")
+        with pytest.raises(sqlite3.DatabaseError, match="cannot be deleted"):
+            raw.execute("DELETE FROM leaderboard_entries")
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+    assert BenchmarkProtocol.PREFIX == "bpr" and BenchmarkSubmission.PREFIX == "bsb"
+    assert LeaderboardSnapshot.PREFIX == "lbs" and LeaderboardEntry.PREFIX == "lbe"
+
+
+def test_leaderboard_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v18.sqlite"
+    make_database(path, 18)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE benchmark_protocols (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 18  # still the old version
+
+
+def test_a_benchmark_submission_needs_its_protocol_to_exist(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.errors import MissingReferenceError
+    from experionyx.leaderboard.entities import BenchmarkSubmission
+
+    path = tmp_path / "v18.sqlite"
+    made = make_database(path, 18)
+    when = datetime(2026, 9, 24, tzinfo=UTC)
+    orphan = BenchmarkSubmission(
+        "bpr_" + "9" * 32,
+        made["inv"].id,
+        "mdl_" + "9" * 32,
+        "bmk_" + "9" * 32,
+        "brs_" + "9" * 32,
+        when,
+    )
     with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
         reg.add(orphan)

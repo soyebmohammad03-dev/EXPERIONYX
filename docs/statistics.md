@@ -157,3 +157,13 @@ ground truth were evaluated, otherwise UNPAIRED with the reason), aggregates rep
 `bootstrap_interval`, and corrects the design's family of tests with `adjust_pvalues`. Differences are
 stressed minus baseline; deterioration is direction-aware. A p-value is not practical importance, and a
 handful of trials gives wide uncertainty. Nothing is combined into a score.
+
+## Reuse by the leaderboard (Phase 20)
+
+The leaderboard layer ([leaderboard.md](leaderboard.md)) adds no inference of its own either.
+`leaderboard.compare.correct_family` calls `adjust_pvalues` directly via the existing `stats.store`
+`CORRECTION` analysis kind, over an explicit family of already-registered `COMPARE` analyses (one
+per pairwise submission comparison a caller built with `experionyx stats compare`). The method
+defaults to `NONE`; `BONFERRONI`/`BENJAMINI_HOCHBERG` must be named explicitly. Nothing here
+computes a p-value from raw metric values itself -- the family is always exactly what the caller
+registered beforehand.

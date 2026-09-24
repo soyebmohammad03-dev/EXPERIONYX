@@ -89,6 +89,16 @@ A) for coverage, baseline metrics, fault responses by grid and point, interactio
 matched only by structure (category, classes, slices, fault types), uncertainty and reproducibility.
 There is no winner and no ranking.
 
+## Leaderboard layer (Phase 20)
+
+The **protocol hash** above is already the model-independent identity of a benchmark; `BenchmarkProtocol`
+(`bpr_`, see [leaderboard.md](leaderboard.md)) promotes it to its own registry row so multiple models'
+results can be grouped under it without duplicating anything. A `BenchmarkSubmission` never re-implements
+benchmark execution -- it calls `run_benchmark` directly and refuses if the executed benchmark's own
+`protocol_hash` does not match. `experionyx leaderboard snapshot` reads each submission's already-stored
+`results.json` (`baseline.metrics`) into raw, per-metric `LeaderboardEntry` values; nothing is recomputed
+and there is no composite score. See [leaderboard.md](leaderboard.md) for the full methodology.
+
 ## Execution, persistence, provenance
 
 `benchmark run` validates, then executes: fault experiments per grid (the first creates the baseline; the
@@ -122,7 +132,11 @@ experionyx benchmark inspect  bmk_...|brs_... [--full] [--format text]
 experionyx benchmark coverage bmk_...|brs_... [--format text]
 experionyx benchmark compare  brs_... brs_... [--format text]
 experionyx benchmark replay   brs_...
+experionyx benchmark protocol SPEC.json [--format text]                      # register the model-independent protocol identity
+experionyx benchmark submit   SPEC.json --protocol bpr_... [--format text]   # run + submit real evidence to a protocol
 ```
+
+See [leaderboard.md](leaderboard.md) for `experionyx leaderboard ...`.
 
 ## Limitations
 

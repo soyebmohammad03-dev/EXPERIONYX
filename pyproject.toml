@@ -105,6 +105,9 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PT", "RUF", "T20", "S"]
 "src/experionyx/reproducibility/*.py" = ["E501"]  # dense entity/taxonomy tables and constructions
 "tests/test_reproducibility*.py" = ["E501", "PT018", "C408"]  # dense expected values
 "tests/reproducibility_helpers.py" = ["E501"]
+"src/experionyx/leaderboard/*.py" = ["E501"]  # dense entity/taxonomy tables and constructions
+"tests/test_leaderboard*.py" = ["E501", "PT018", "C408"]  # dense expected values
+"tests/leaderboard_helpers.py" = ["E501"]
 "examples/*" = ["T201", "S311"]  # demo output; random is for illustration, not security
 
 [tool.mypy]

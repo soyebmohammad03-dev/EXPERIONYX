@@ -25,11 +25,15 @@
     typed, versioned relationships derived generically from the registry's own references; edges
     are provenance/evidence metadata, never an inferred causal claim; unresolved references are
     kept as explicit nodes, never dropped; see [graph.md](graph.md))
-20. Advanced Reproducibility & Experiment Replay (done: a classification layer over every engine's
-    own `replay_check` distinguishing exact/deterministic/tolerance/statistical/provenance-only
-    agreement, environment and artifact-integrity checks, and scheduler/graph integration; never
-    promises bit-for-bit reproduction the platform cannot guarantee; see
-    [reproducibility.md](reproducibility.md)) + Benchmark & Leaderboard System
+20. Advanced Reproducibility & Experiment Replay + Benchmark & Leaderboard System (done: a
+    classification layer over every engine's own `replay_check` distinguishing exact/deterministic/
+    tolerance/statistical/provenance-only agreement, environment and artifact-integrity checks, and
+    scheduler/graph integration, never promising bit-for-bit reproduction the platform cannot
+    guarantee (see [reproducibility.md](reproducibility.md)); and a benchmark protocol/leaderboard
+    layer over the existing benchmark engine — model-independent protocol identity, provenance-linked
+    submissions, immutable snapshots, protocol-constrained metric-specific comparison, explicit
+    multiple-comparison correction, reproducibility-state and resource-context reporting; no universal
+    score or "best model" verdict (see [leaderboard.md](leaderboard.md)))
 21. Research validation
 22. Advanced UI/API
 23. Public release / reproducibility package

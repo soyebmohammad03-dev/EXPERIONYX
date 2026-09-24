@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 20 (advanced reproducibility framework).** The typed domain model, a local SQLite registry,
+> **Status: Phase 20 (advanced reproducibility + benchmark/leaderboard system).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -141,6 +141,12 @@ See [docs/architecture.md](docs/architecture.md) and
   artifact-integrity checks, scheduler and graph integration (a `REPRODUCTION` unit kind; a
   `ReproductionAttempt` node connected by `REPRODUCED_BY`/`COMPARED_WITH` edges). Never promises
   bit-for-bit reproduction the platform cannot guarantee; a reproduction attempt never mutates its target.
+- Benchmark protocol & leaderboard system ([docs/leaderboard.md](docs/leaderboard.md)): a reporting/
+  organization layer over the existing Phase 9 benchmark engine — model-independent protocol identity
+  (the real expanded `protocol_hash`), provenance-linked submissions (never anonymous), immutable
+  leaderboard snapshots, protocol-constrained metric-specific comparisons, explicit multiple-comparison
+  correction (reusing Phase 10), reproducibility-state and resource-context reporting kept separate from
+  predictive metrics. No universal score, no "best model" verdict, no combined ranking.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

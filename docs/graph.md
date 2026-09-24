@@ -172,6 +172,19 @@ every existing table and every migration `v1→v16` is unchanged. Delete trigger
 row, like every other table in the registry. A collect run's artifacts live under
 `graph/{spec,nodes,edges,summary}.json` in the run's artifact directory.
 
+## Phase 20 integration: no new traversal code
+
+`ReproductionAttempt` ([reproducibility.md](reproducibility.md)) and every leaderboard entity
+(`BenchmarkProtocol`, `BenchmarkSubmission`, `LeaderboardSnapshot`, `LeaderboardEntry`, see
+[leaderboard.md](leaderboard.md)) are in `graph.build.ENTITY_TYPES` like anything else, so they
+appear in a constructed graph automatically through the same generic field walk this module already
+uses for every other entity kind. `ReproductionAttempt.target_id`/`replay_run_id` become
+`REPRODUCED_BY`/`COMPARED_WITH` edges (`FIELD_RELATION` overrides); a `BenchmarkSubmission`'s
+`result_id`/`benchmark_id`/`protocol_id` fields become `DERIVED_FROM`/`MEMBER_OF` edges to its real
+`BenchmarkResult`/`Benchmark`/`BenchmarkProtocol` nodes — and, transitively, to the real `Run` and
+artifacts behind them. Neither integration added a single line to `graph.query` or `graph.build`
+beyond a handful of new `ENTITY_TYPES` entries and two `FIELD_RELATION` overrides.
+
 ## Known limitations
 
 * `GraphSpec.investigation_id` scopes entities that themselves carry an `investigation_id`; an

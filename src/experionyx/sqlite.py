@@ -58,6 +58,12 @@ from experionyx.interactions.entities import (
     InteractionEffect,
     InteractionEvidence,
 )
+from experionyx.leaderboard.entities import (
+    BenchmarkProtocol,
+    BenchmarkSubmission,
+    LeaderboardEntry,
+    LeaderboardSnapshot,
+)
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
@@ -83,7 +89,8 @@ from experionyx.stress.entities import StressAnalysis, StressTrial
 # 16: schedules, schedule runs, schedule units, execution attempts and unit state transitions.
 # 17: evidence graphs, graph snapshots, graph nodes and graph edges.
 # 18: reproduction attempts.
-DB_SCHEMA_VERSION = 18
+# 19: benchmark protocols, submissions, leaderboard snapshots and entries.
+DB_SCHEMA_VERSION = 19
 
 
 @dataclass(frozen=True)
@@ -404,6 +411,38 @@ _SPECS: dict[type[Entity], _Spec] = {
         optional=("run_id",),
         since=18,
     ),
+    BenchmarkProtocol: _Spec(
+        "benchmark_protocols",
+        refs=(("dataset_record_id", RegisteredDataset),),
+        plain=("protocol_hash",),
+        since=19,
+    ),
+    BenchmarkSubmission: _Spec(
+        "benchmark_submissions",
+        refs=(
+            ("protocol_id", BenchmarkProtocol),
+            ("investigation_id", Investigation),
+            ("model_record_id", RegisteredModel),
+            ("benchmark_id", Benchmark),
+            ("result_id", BenchmarkResult),
+        ),
+        since=19,
+    ),
+    LeaderboardSnapshot: _Spec(
+        "leaderboard_snapshots",
+        refs=(("protocol_id", BenchmarkProtocol), ("investigation_id", Investigation)),
+        plain=("source_fingerprint",),
+        since=19,
+    ),
+    LeaderboardEntry: _Spec(
+        "leaderboard_entries",
+        refs=(
+            ("snapshot_id", LeaderboardSnapshot),
+            ("submission_id", BenchmarkSubmission),
+            ("model_record_id", RegisteredModel),
+        ),
+        since=19,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -578,6 +617,13 @@ def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
+    """Phase 19-20: benchmark protocols, submissions, leaderboard snapshots and entries (new
+    tables only)."""
+    for statement in _ddl(upto=19, since=19):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -596,6 +642,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
     17: _migrate_17_to_18,
+    18: _migrate_18_to_19,
 }
 
 

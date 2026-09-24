@@ -88,6 +88,22 @@ bookkeeping (its `ConfigurationRef`/`Experiment`/`Run`/`Claim`) is excluded from
 graph construction treats as evidence, so re-collection converges instead of absorbing every
 previous construction's bookkeeping. See [graph.md](graph.md).
 
+## Reproduction attempts (Phase 20)
+
+A `ReproductionAttempt` never re-derives provenance of its own -- it reads and compares the
+`Provenance`/`EnvironmentSnapshot` of the target's original run against the run its own replay
+produced (Python version, OS, machine, package versions, dependency digest, executor version,
+seed, source commit), reporting what changed as `environment_diff`. The replay run itself has its
+own full Provenance record, exactly as any other run would. See
+[reproducibility.md](reproducibility.md).
+
+## Benchmark submissions (Phase 20)
+
+A `BenchmarkSubmission` carries no provenance of its own beyond referencing a real `Benchmark`/
+`BenchmarkResult`, whose provenance is exactly what [benchmarks.md](benchmarks.md) already
+documents (protocol hash, every unit's run provenance fingerprint, the collect run's own
+Provenance record). See [leaderboard.md](leaderboard.md).
+
 ## Calibration analyses (Phase 15)
 
 Every calibration analysis is a Run with its own Provenance record (source revision, environment,

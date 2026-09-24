@@ -55,6 +55,7 @@ from experionyx.errors import (
     NotFoundError,
     ProfileRefusal,
     SchedulerRefusal,
+    ValidationError,
 )
 from experionyx.evaluation.compare import compare_evaluations
 from experionyx.evaluation.config import (
@@ -116,6 +117,22 @@ from experionyx.interactions.lifecycle import (
 )
 from experionyx.interactions.registry import InteractionRegistry
 from experionyx.interactions.taxonomy import InteractionStatus
+from experionyx.leaderboard.compare import (
+    CORRECTION_METHODS,
+    compare_protocol_constrained,
+    compare_submissions,
+    correct_family,
+)
+from experionyx.leaderboard.entities import (
+    BenchmarkProtocol,
+    BenchmarkSubmission,
+    LeaderboardEntry,
+    LeaderboardSnapshot,
+)
+from experionyx.leaderboard.protocol import register_protocol, resolve_protocol
+from experionyx.leaderboard.snapshot import build_snapshot
+from experionyx.leaderboard.submission import resolve_submission
+from experionyx.leaderboard.submission import submit as submit_benchmark
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import Registry
 from experionyx.reliability.engine import replay_check as profile_replay_check
@@ -1597,6 +1614,143 @@ def _cmd_benchmark_replay(args: argparse.Namespace) -> int:
         )
         _dump(out)
         return 0 if out["deterministic"] is True else 1
+
+
+def _cmd_benchmark_protocol(args: argparse.Namespace) -> int:
+    spec = _load_benchmark_spec(args.spec)
+    with _open(args.workspace) as reg:
+        protocol = register_protocol(reg, spec)
+        _emit(
+            protocol.to_dict() | {"id": protocol.id},
+            f"{protocol.id}: protocol {protocol.name} {protocol.version} (hash {protocol.protocol_hash[7:19]})",
+            args,
+        )
+    return 0
+
+
+def _cmd_benchmark_submit(args: argparse.Namespace) -> int:
+    spec = _load_benchmark_spec(args.spec)
+    with _open(args.workspace) as reg:
+        protocol = resolve_protocol(reg, args.protocol)
+        try:
+            result = submit_benchmark(
+                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                _executor(reg, args.workspace), protocol, spec, source_root=Path.cwd(),
+            )  # fmt: skip
+        except BenchmarkRefusal as exc:
+            print("error: benchmark refused; nothing was submitted", file=sys.stderr)
+            for issue in exc.issues:
+                print(f"  - {issue}", file=sys.stderr)
+            return 2
+        doc: dict[str, object] = {
+            "submission_id": result.submission_id, "benchmark_id": result.benchmark_id,
+            "result_id": result.result_id, "status": result.status.value if result.status else None,
+            "already_submitted": result.already_submitted,
+        }  # fmt: skip
+        _emit(doc, f"submission {result.submission_id} to protocol {protocol.id}", args)
+    return 0 if result.submission_id is not None else 1
+
+
+def _cmd_leaderboard_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        protocols = sorted(reg.find(BenchmarkProtocol), key=lambda p: p.id)
+        _emit(
+            {"protocols": [p.to_dict() | {"id": p.id} for p in protocols]},
+            "\n".join(f"{p.id} {p.name} {p.version} (hash {p.protocol_hash[7:19]})" for p in protocols),
+            args,
+        )  # fmt: skip
+    return 0
+
+
+def _cmd_leaderboard_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        ref = args.id
+        if ref.startswith(BenchmarkProtocol.PREFIX + "_") or not any(ref.startswith(p + "_") for p in (BenchmarkSubmission.PREFIX, LeaderboardSnapshot.PREFIX, LeaderboardEntry.PREFIX)):  # fmt: skip
+            protocol = resolve_protocol(reg, ref)
+            submissions = sorted(reg.find(BenchmarkSubmission, protocol_id=protocol.id), key=lambda s: s.id)  # fmt: skip
+            snapshots = sorted(reg.find(LeaderboardSnapshot, protocol_id=protocol.id), key=lambda s: s.id)  # fmt: skip
+            doc: dict[str, object] = {
+                **protocol.to_dict(),
+                "id": protocol.id,
+                "submissions": [s.id for s in submissions],
+                "snapshots": [s.id for s in snapshots],
+            }
+            _emit(doc, f"{protocol.id}: {len(submissions)} submission(s), {len(snapshots)} snapshot(s)", args)  # fmt: skip
+        elif ref.startswith(BenchmarkSubmission.PREFIX + "_"):
+            sub = resolve_submission(reg, ref)
+            _emit(sub.to_dict() | {"id": sub.id}, f"{sub.id}: model {sub.model_record_id}, result {sub.result_id}", args)  # fmt: skip
+        elif ref.startswith(LeaderboardSnapshot.PREFIX + "_"):
+            snap = reg.get(LeaderboardSnapshot, ref)
+            entries = sorted(reg.find(LeaderboardEntry, snapshot_id=snap.id), key=lambda e: e.id)
+            doc = {**snap.to_dict(), "id": snap.id, "entries": [e.to_dict() | {"id": e.id} for e in entries]}  # fmt: skip
+            _emit(doc, f"{snap.id}: {len(entries)} entrie(s), {len(snap.excluded)} excluded", args)
+        else:
+            entry = reg.get(LeaderboardEntry, ref)
+            _emit(entry.to_dict() | {"id": entry.id}, f"{entry.id}: {entry.reproducibility_state.value}", args)  # fmt: skip
+    return 0
+
+
+def _cmd_leaderboard_snapshot(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        protocol = resolve_protocol(reg, args.protocol)
+        snapshot = build_snapshot(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), protocol,
+            metric_ids=tuple(args.metric or ()), require_complete_coverage=args.require_complete_coverage,
+            require_reproduction=args.require_reproduction,
+        )  # fmt: skip
+        entries = sorted(reg.find(LeaderboardEntry, snapshot_id=snapshot.id), key=lambda e: e.id)
+        doc = {**snapshot.to_dict(), "id": snapshot.id, "entries": [e.to_dict() | {"id": e.id} for e in entries]}  # fmt: skip
+        _emit(doc, f"{snapshot.id}: {len(entries)} entrie(s), {len(snapshot.excluded)} excluded", args)  # fmt: skip
+    return 0
+
+
+def _cmd_leaderboard_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        try:
+            compare_protocol_constrained(reg, args.a, args.b)
+            out = compare_submissions(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.a, args.b)  # fmt: skip
+        except (ValidationError, BenchmarkRefusal) as exc:
+            print("error: submissions are not comparable; nothing was compared", file=sys.stderr)
+            print(f"  - {exc}", file=sys.stderr)
+            return 2
+        _emit(out, f"compared {args.a} with {args.b} under protocol {out['protocol_hash'][7:19]}", args)  # fmt: skip
+    return 0
+
+
+def _cmd_leaderboard_correct(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        analysis = correct_family(reg, tuple(args.analysis), method=args.method, alpha=args.alpha)
+        _dump(analysis.to_dict() | {"id": analysis.id})
+    return 0
+
+
+def _cmd_leaderboard_verify(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        sub = resolve_submission(reg, args.id)
+        result = reg.get(BenchmarkResult, sub.result_id)
+        out = reproduction_verify(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), result.run_id)  # fmt: skip
+        _dump(out)
+    return 1 if out["corrupted"] else 0
+
+
+def _cmd_leaderboard_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        original = reg.get(LeaderboardSnapshot, args.id)
+        protocol = reg.get(BenchmarkProtocol, original.protocol_id)
+        require_coverage = bool(original.filtering_rules.get("require_complete_coverage", False))
+        require_repro = bool(original.evidence_requirements.get("require_reproduction", False))
+        rebuilt = build_snapshot(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), protocol,
+            metric_ids=original.metric_ids, require_complete_coverage=require_coverage,
+            require_reproduction=require_repro,
+        )  # fmt: skip
+        same = rebuilt.id == original.id
+        _emit(
+            {"original": original.id, "rebuilt": rebuilt.id, "deterministic": same},
+            f"replay of {original.id}: {'identical' if same else 'evidence has changed: ' + rebuilt.id}",
+            args,
+        )
+    return 0 if same else 1
 
 
 def _load_schedule_spec(path: str) -> ScheduleSpec:
@@ -3716,6 +3870,52 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_benchmark_replay)
+    p = bm.add_parser("protocol", help="register a benchmark spec's model-independent protocol identity")  # fmt: skip
+    p.add_argument("spec", help="benchmark spec JSON file (the model field is ignored for identity)")  # fmt: skip
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_protocol)
+    p = bm.add_parser("submit", help="run a full benchmark (Phase 9) and submit its evidence to a registered protocol")  # fmt: skip
+    p.add_argument("spec", help="benchmark spec JSON file, including the model")
+    p.add_argument("--protocol", required=True, help="protocol ID (bpr_...) or a protocol_hash prefix")  # fmt: skip
+    bfmt(p)
+    p.set_defaults(func=_cmd_benchmark_submit)
+
+    lb = group("leaderboard", "reporting/organization over benchmark submissions; never a universal score or ranking")  # fmt: skip
+
+    def lfmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    p = lb.add_parser("list", help="list registered benchmark protocols")
+    lfmt(p)
+    p.set_defaults(func=_cmd_leaderboard_list)
+    p = lb.add_parser("inspect", help="a protocol (bpr_), submission (bsb_), snapshot (lbs_) or entry (lbe_)")  # fmt: skip
+    p.add_argument("id")
+    lfmt(p)
+    p.set_defaults(func=_cmd_leaderboard_inspect)
+    p = lb.add_parser("snapshot", help="build (or reuse) an immutable snapshot of every qualifying submission to a protocol")  # fmt: skip
+    p.add_argument("protocol", help="protocol ID (bpr_...) or a protocol_hash prefix")
+    p.add_argument("--metric", action="append", help="restrict to this metric id (repeatable); default: every metric present")  # fmt: skip
+    p.add_argument("--require-complete-coverage", action="store_true")
+    p.add_argument("--require-reproduction", action="store_true")
+    lfmt(p)
+    p.set_defaults(func=_cmd_leaderboard_snapshot)
+    p = lb.add_parser("compare", help="protocol-constrained raw comparison of two submissions (no winner)")  # fmt: skip
+    p.add_argument("a", help="submission ID (bsb_...)")
+    p.add_argument("b", help="submission ID (bsb_...)")
+    lfmt(p)
+    p.set_defaults(func=_cmd_leaderboard_compare)
+    p = lb.add_parser("correct", help="multiple-comparison correction over an explicit family of registered stats analyses")  # fmt: skip
+    p.add_argument("analysis", nargs="+", help="sta_... COMPARE analysis IDs forming the family")
+    p.add_argument("--method", choices=list(CORRECTION_METHODS), default="NONE")
+    p.add_argument("--alpha", type=float, default=0.05)
+    p.set_defaults(func=_cmd_leaderboard_correct)
+    p = lb.add_parser("verify", help="re-hash a submission's underlying benchmark run artifacts")
+    p.add_argument("id", help="submission ID (bsb_...)")
+    p.set_defaults(func=_cmd_leaderboard_verify)
+    p = lb.add_parser("replay", help="rebuild a snapshot from current evidence; exit 1 if the evidence changed")  # fmt: skip
+    p.add_argument("id", help="snapshot ID (lbs_...)")
+    lfmt(p)
+    p.set_defaults(func=_cmd_leaderboard_replay)
 
     st = group(
         "stats",
