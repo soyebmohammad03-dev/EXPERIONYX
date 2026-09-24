@@ -53,6 +53,14 @@ from experionyx.errors import (
 )
 from experionyx.hashing import HASH_PREFIX, canonical_json
 
+# CPU convolution/reduction kernels can be chosen per batch size and thread count, which changes
+# floating-point summation order (and therefore the exact output) without the model itself being
+# nondeterministic. Forcing deterministic algorithms makes inference outputs independent of batch
+# size and worker concurrency, which is what this project's own resource measurements assume
+# (docs/resources.md: "a difference in outputs between worker counts is real evidence of
+# non-determinism" -- that claim only holds once ordinary kernel-selection variance is removed).
+torch.use_deterministic_algorithms(True)
+
 ADAPTER_VERSION = "1.0.0"
 _SPLIT_CAPABILITIES = {
     "train": DatasetCapability.TRAIN_SPLIT,
