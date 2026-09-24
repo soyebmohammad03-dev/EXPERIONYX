@@ -176,3 +176,10 @@ disable_error_code = ["index", "operator", "call-overload", "arg-type", "attr-de
 # scikit-learn and joblib ship no type information.
 module = ["sklearn", "sklearn.*", "joblib"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# uvicorn is only a runtime dependency of the optional `viz` extra, not `dev`; CI and a plain
+# `pip install -e .[dev]` never install it. `_cmd_viz_serve` already guards the import with
+# ModuleNotFoundError at runtime -- this only silences the missing-stub/missing-package check.
+module = "uvicorn"
+ignore_missing_imports = true
