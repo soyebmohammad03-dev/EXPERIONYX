@@ -34,6 +34,16 @@
     submissions, immutable snapshots, protocol-constrained metric-specific comparison, explicit
     multiple-comparison correction, reproducibility-state and resource-context reporting; no universal
     score or "best model" verdict (see [leaderboard.md](leaderboard.md)))
-21. Research validation
-22. Advanced UI/API
-23. Public release / reproducibility package
+21. Research Reporting (done: a versioned, deterministic reporting layer that assembles structured
+    reports from evidence every prior engine already persisted — never re-executes anything;
+    claims cannot exist without a resolvable evidence reference; statistical results are rendered
+    verbatim, never reinterpreted; templates are versioned so changing one never changes an old
+    report's meaning; Markdown is the canonical export, HTML a thin derived one; see
+    [reporting.md](reporting.md))
+22. Evidence Dossiers (done: a structured, persisted research package layered on reporting and the
+    Phase 19 graph — deterministic construction from an investigation/report/run/failure/
+    benchmark/reliability-profile/graph scope, explicit evidence-sufficiency analysis (gaps,
+    conflicts, provenance/reproducibility gaps, never hidden), preserved rather than resolved
+    conflicting evidence, and immutable content-addressed snapshots; see [dossier.md](dossier.md))
+23. Advanced UI/API
+24. Public release / reproducibility package

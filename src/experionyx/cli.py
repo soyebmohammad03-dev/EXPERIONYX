@@ -43,6 +43,16 @@ from experionyx.domain import (
     RunStatus,
     to_jsonable,
 )
+from experionyx.dossier.builder import build_dossier
+from experionyx.dossier.builder import build_snapshot as build_dossier_snapshot
+from experionyx.dossier.entities import (
+    DossierFinding,
+    DossierItem,
+    DossierSnapshot,
+    EvidenceDossier,
+)
+from experionyx.dossier.spec import DossierSpec
+from experionyx.dossier.taxonomy import DossierSourceKind
 from experionyx.drift import engine as drift_engine
 from experionyx.drift.entities import DriftAnalysis, DriftWindow
 from experionyx.drift.registry import DriftRegistry
@@ -140,6 +150,12 @@ from experionyx.reliability.engine import run_profile
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.registry import ReliabilityProfileRegistry
 from experionyx.reliability.spec import ProfileSpec
+from experionyx.reporting.entities import Report, ReportFinding
+from experionyx.reporting.generator import builtin_template, ensure_template, generate_report
+from experionyx.reporting.render import render_html, render_markdown
+from experionyx.reporting.spec import ReportSpec
+from experionyx.reporting.taxonomy import ReportType
+from experionyx.reporting.validate import validate_report as report_validate
 from experionyx.reproducibility.engine import compare_artifact_documents as reproduction_compare
 from experionyx.reproducibility.engine import resolve_attempt as reproduction_resolve
 from experionyx.reproducibility.engine import resolve_target as reproduction_resolve_target
@@ -369,8 +385,13 @@ def _cmd_model_inspect(args: argparse.Namespace) -> int:
         device=DeviceKind(args.device),
         options=_options(args.option),
     )
-    _dump({"device": _json(adapter.device), "load_seconds": adapter.load_seconds,
-           "metadata": _json(adapter.metadata())})  # fmt: skip
+    _dump(
+        {
+            "device": _json(adapter.device),
+            "load_seconds": adapter.load_seconds,
+            "metadata": _json(adapter.metadata()),
+        }
+    )
     return 0
 
 
@@ -583,10 +604,20 @@ def _cmd_fault_inspect(args: argparse.Namespace) -> int:
                 "doc": ft.param_docs.get(f.name, ""),
             }
         )
-    _dump({"name": ft.name, "version": ft.version, "category": ft.category.value, "target": ft.target.value,
-           "description": ft.description, "requires": sorted(r.value for r in ft.requires),
-           "stochastic": ft.stochastic, "implemented": ft.implemented, "sweepable": list(ft.sweepable()),
-           "parameters": params})  # fmt: skip
+    _dump(
+        {
+            "name": ft.name,
+            "version": ft.version,
+            "category": ft.category.value,
+            "target": ft.target.value,
+            "description": ft.description,
+            "requires": sorted(r.value for r in ft.requires),
+            "stochastic": ft.stochastic,
+            "implemented": ft.implemented,
+            "sweepable": list(ft.sweepable()),
+            "parameters": params,
+        }
+    )
     return 0
 
 
@@ -689,13 +720,29 @@ def _cmd_fault_compare(args: argparse.Namespace) -> int:
             load_evaluation(reg, store, args.treatment_run),
         )
         fault = read_artifact(reg, store, args.treatment_run, "fault/fault.json")
-    _dump({
-        "baseline_run": args.baseline_run, "treatment_run": args.treatment_run,
-        "fault": {k: fault[k] for k in ("fault_id", "fault", "seed", "scope", "affected_samples", "total_samples", "timings_seconds")} if isinstance(fault, dict) else None,
-        "degradation": [_json(d) for d in measure_degradation(base, treat)],
-        "latency": _json(measure_latency(base, treat)),
-        "note": "deterioration > 0 means worse (direction-aware); this is a measurement, not a verdict",
-    })  # fmt: skip
+    _dump(
+        {
+            "baseline_run": args.baseline_run,
+            "treatment_run": args.treatment_run,
+            "fault": {
+                k: fault[k]
+                for k in (
+                    "fault_id",
+                    "fault",
+                    "seed",
+                    "scope",
+                    "affected_samples",
+                    "total_samples",
+                    "timings_seconds",
+                )
+            }
+            if isinstance(fault, dict)
+            else None,
+            "degradation": [_json(d) for d in measure_degradation(base, treat)],
+            "latency": _json(measure_latency(base, treat)),
+            "note": "deterioration > 0 means worse (direction-aware); this is a measurement, not a verdict",
+        }
+    )
     return 0
 
 
@@ -1634,19 +1681,25 @@ def _cmd_benchmark_submit(args: argparse.Namespace) -> int:
         protocol = resolve_protocol(reg, args.protocol)
         try:
             result = submit_benchmark(
-                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
-                _executor(reg, args.workspace), protocol, spec, source_root=Path.cwd(),
-            )  # fmt: skip
+                reg,
+                LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                _executor(reg, args.workspace),
+                protocol,
+                spec,
+                source_root=Path.cwd(),
+            )
         except BenchmarkRefusal as exc:
             print("error: benchmark refused; nothing was submitted", file=sys.stderr)
             for issue in exc.issues:
                 print(f"  - {issue}", file=sys.stderr)
             return 2
         doc: dict[str, object] = {
-            "submission_id": result.submission_id, "benchmark_id": result.benchmark_id,
-            "result_id": result.result_id, "status": result.status.value if result.status else None,
+            "submission_id": result.submission_id,
+            "benchmark_id": result.benchmark_id,
+            "result_id": result.result_id,
+            "status": result.status.value if result.status else None,
             "already_submitted": result.already_submitted,
-        }  # fmt: skip
+        }
         _emit(doc, f"submission {result.submission_id} to protocol {protocol.id}", args)
     return 0 if result.submission_id is not None else 1
 
@@ -1656,37 +1709,66 @@ def _cmd_leaderboard_list(args: argparse.Namespace) -> int:
         protocols = sorted(reg.find(BenchmarkProtocol), key=lambda p: p.id)
         _emit(
             {"protocols": [p.to_dict() | {"id": p.id} for p in protocols]},
-            "\n".join(f"{p.id} {p.name} {p.version} (hash {p.protocol_hash[7:19]})" for p in protocols),
+            "\n".join(
+                f"{p.id} {p.name} {p.version} (hash {p.protocol_hash[7:19]})" for p in protocols
+            ),
             args,
-        )  # fmt: skip
+        )
     return 0
 
 
 def _cmd_leaderboard_inspect(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         ref = args.id
-        if ref.startswith(BenchmarkProtocol.PREFIX + "_") or not any(ref.startswith(p + "_") for p in (BenchmarkSubmission.PREFIX, LeaderboardSnapshot.PREFIX, LeaderboardEntry.PREFIX)):  # fmt: skip
+        if ref.startswith(BenchmarkProtocol.PREFIX + "_") or not any(
+            ref.startswith(p + "_")
+            for p in (
+                BenchmarkSubmission.PREFIX,
+                LeaderboardSnapshot.PREFIX,
+                LeaderboardEntry.PREFIX,
+            )
+        ):
             protocol = resolve_protocol(reg, ref)
-            submissions = sorted(reg.find(BenchmarkSubmission, protocol_id=protocol.id), key=lambda s: s.id)  # fmt: skip
-            snapshots = sorted(reg.find(LeaderboardSnapshot, protocol_id=protocol.id), key=lambda s: s.id)  # fmt: skip
+            submissions = sorted(
+                reg.find(BenchmarkSubmission, protocol_id=protocol.id), key=lambda s: s.id
+            )
+            snapshots = sorted(
+                reg.find(LeaderboardSnapshot, protocol_id=protocol.id), key=lambda s: s.id
+            )
             doc: dict[str, object] = {
                 **protocol.to_dict(),
                 "id": protocol.id,
                 "submissions": [s.id for s in submissions],
                 "snapshots": [s.id for s in snapshots],
             }
-            _emit(doc, f"{protocol.id}: {len(submissions)} submission(s), {len(snapshots)} snapshot(s)", args)  # fmt: skip
+            _emit(
+                doc,
+                f"{protocol.id}: {len(submissions)} submission(s), {len(snapshots)} snapshot(s)",
+                args,
+            )
         elif ref.startswith(BenchmarkSubmission.PREFIX + "_"):
             sub = resolve_submission(reg, ref)
-            _emit(sub.to_dict() | {"id": sub.id}, f"{sub.id}: model {sub.model_record_id}, result {sub.result_id}", args)  # fmt: skip
+            _emit(
+                sub.to_dict() | {"id": sub.id},
+                f"{sub.id}: model {sub.model_record_id}, result {sub.result_id}",
+                args,
+            )
         elif ref.startswith(LeaderboardSnapshot.PREFIX + "_"):
             snap = reg.get(LeaderboardSnapshot, ref)
             entries = sorted(reg.find(LeaderboardEntry, snapshot_id=snap.id), key=lambda e: e.id)
-            doc = {**snap.to_dict(), "id": snap.id, "entries": [e.to_dict() | {"id": e.id} for e in entries]}  # fmt: skip
+            doc = {
+                **snap.to_dict(),
+                "id": snap.id,
+                "entries": [e.to_dict() | {"id": e.id} for e in entries],
+            }
             _emit(doc, f"{snap.id}: {len(entries)} entrie(s), {len(snap.excluded)} excluded", args)
         else:
             entry = reg.get(LeaderboardEntry, ref)
-            _emit(entry.to_dict() | {"id": entry.id}, f"{entry.id}: {entry.reproducibility_state.value}", args)  # fmt: skip
+            _emit(
+                entry.to_dict() | {"id": entry.id},
+                f"{entry.id}: {entry.reproducibility_state.value}",
+                args,
+            )
     return 0
 
 
@@ -1694,13 +1776,22 @@ def _cmd_leaderboard_snapshot(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         protocol = resolve_protocol(reg, args.protocol)
         snapshot = build_snapshot(
-            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), protocol,
-            metric_ids=tuple(args.metric or ()), require_complete_coverage=args.require_complete_coverage,
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            protocol,
+            metric_ids=tuple(args.metric or ()),
+            require_complete_coverage=args.require_complete_coverage,
             require_reproduction=args.require_reproduction,
-        )  # fmt: skip
+        )
         entries = sorted(reg.find(LeaderboardEntry, snapshot_id=snapshot.id), key=lambda e: e.id)
-        doc = {**snapshot.to_dict(), "id": snapshot.id, "entries": [e.to_dict() | {"id": e.id} for e in entries]}  # fmt: skip
-        _emit(doc, f"{snapshot.id}: {len(entries)} entrie(s), {len(snapshot.excluded)} excluded", args)  # fmt: skip
+        doc = {
+            **snapshot.to_dict(),
+            "id": snapshot.id,
+            "entries": [e.to_dict() | {"id": e.id} for e in entries],
+        }
+        _emit(
+            doc, f"{snapshot.id}: {len(entries)} entrie(s), {len(snapshot.excluded)} excluded", args
+        )
     return 0
 
 
@@ -1708,12 +1799,18 @@ def _cmd_leaderboard_compare(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         try:
             compare_protocol_constrained(reg, args.a, args.b)
-            out = compare_submissions(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.a, args.b)  # fmt: skip
+            out = compare_submissions(
+                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.a, args.b
+            )
         except (ValidationError, BenchmarkRefusal) as exc:
             print("error: submissions are not comparable; nothing was compared", file=sys.stderr)
             print(f"  - {exc}", file=sys.stderr)
             return 2
-        _emit(out, f"compared {args.a} with {args.b} under protocol {out['protocol_hash'][7:19]}", args)  # fmt: skip
+        _emit(
+            out,
+            f"compared {args.a} with {args.b} under protocol {out['protocol_hash'][7:19]}",
+            args,
+        )
     return 0
 
 
@@ -1728,7 +1825,9 @@ def _cmd_leaderboard_verify(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         sub = resolve_submission(reg, args.id)
         result = reg.get(BenchmarkResult, sub.result_id)
-        out = reproduction_verify(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), result.run_id)  # fmt: skip
+        out = reproduction_verify(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), result.run_id
+        )
         _dump(out)
     return 1 if out["corrupted"] else 0
 
@@ -1740,10 +1839,13 @@ def _cmd_leaderboard_replay(args: argparse.Namespace) -> int:
         require_coverage = bool(original.filtering_rules.get("require_complete_coverage", False))
         require_repro = bool(original.evidence_requirements.get("require_reproduction", False))
         rebuilt = build_snapshot(
-            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), protocol,
-            metric_ids=original.metric_ids, require_complete_coverage=require_coverage,
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            protocol,
+            metric_ids=original.metric_ids,
+            require_complete_coverage=require_coverage,
             require_reproduction=require_repro,
-        )  # fmt: skip
+        )
         same = rebuilt.id == original.id
         _emit(
             {"original": original.id, "rebuilt": rebuilt.id, "deterministic": same},
@@ -1848,7 +1950,7 @@ def _cmd_scheduler_run(args: argparse.Namespace) -> int:
         dry_run_only=args.dry_run,
         source_root=Path.cwd(),
     )
-    text = f"schedule {result.schedule_id}: {result.status.value if result.status else 'DRY_RUN'} {dict(result.counts)}"  # fmt: skip
+    text = f"schedule {result.schedule_id}: {result.status.value if result.status else 'DRY_RUN'} {dict(result.counts)}"
     _emit(result.to_dict(), text, args)
     if result.dry_run:
         return 0 if not result.issues else 1
@@ -1868,7 +1970,7 @@ def _cmd_scheduler_resume(args: argparse.Namespace) -> int:
         max_workers=args.max_workers,
         source_root=Path.cwd(),
     )
-    text = f"schedule {result.schedule_id}: resumed as {result.schedule_run_id}, {result.status.value if result.status else '?'} {dict(result.counts)}"  # fmt: skip
+    text = f"schedule {result.schedule_id}: resumed as {result.schedule_run_id}, {result.status.value if result.status else '?'} {dict(result.counts)}"
     _emit(result.to_dict(), text, args)
     return 0 if result.status is ScheduleRunState.COMPLETED else 1
 
@@ -1890,7 +1992,10 @@ def _cmd_scheduler_status(args: argparse.Namespace) -> int:
             "runs": [_run_row(r) for r in runs],
         }
         lines = [f"{sched.id} {sched.name} {sched.version}: {counts}"]
-        lines += [f"  {v.key:24} {v.status.value:14} attempts={v.attempts} ref={v.primary_ref}" for v in views]  # fmt: skip
+        lines += [
+            f"  {v.key:24} {v.status.value:14} attempts={v.attempts} ref={v.primary_ref}"
+            for v in views
+        ]
         _emit(doc, "\n".join(lines), args)
     return 0
 
@@ -1974,7 +2079,7 @@ def _cmd_scheduler_replay(args: argparse.Namespace) -> int:
         k: {"before": [before[k][0].value, before[k][1]], "after": [after[k][0].value, after[k][1]]}
         for k in before
         if before.get(k) != after.get(k)
-    }  # fmt: skip
+    }
     env_dependent = sorted(
         {u.key for u in expand(spec).units if u.kind.value == "RESOURCE"} & set(differences)
     )
@@ -2008,7 +2113,13 @@ def _load_graph_spec(path: str) -> GraphSpec:
 
 
 def _graph_row(g: EvidenceGraph) -> dict[str, object]:
-    return {"id": g.id, "name": g.name, "version": g.version, "spec_id": g.spec_id, "engine_version": g.engine_version}  # fmt: skip
+    return {
+        "id": g.id,
+        "name": g.name,
+        "version": g.version,
+        "spec_id": g.spec_id,
+        "engine_version": g.engine_version,
+    }
 
 
 def _snapshot_row(s: GraphSnapshot) -> dict[str, object]:
@@ -2040,7 +2151,7 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
         }
         if result.snapshot_id is not None:
             doc["snapshot"] = _snapshot_row(reg.get(GraphSnapshot, result.snapshot_id))
-        text = f"graph {result.graph_id}: snapshot {result.snapshot_id} ({'reused' if result.already_built else 'built'})"  # fmt: skip
+        text = f"graph {result.graph_id}: snapshot {result.snapshot_id} ({'reused' if result.already_built else 'built'})"
         _emit(doc, text, args)
     return 0 if result.snapshot_id is not None else 1
 
@@ -2058,10 +2169,16 @@ def _cmd_graph_list(args: argparse.Namespace) -> int:
 
 def _cmd_graph_inspect(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        if args.id.startswith(EvidenceGraph.PREFIX + "_") or not args.id.startswith(GraphSnapshot.PREFIX + "_"):  # fmt: skip
+        if args.id.startswith(EvidenceGraph.PREFIX + "_") or not args.id.startswith(
+            GraphSnapshot.PREFIX + "_"
+        ):
             g = resolve_graph(reg, args.id)
             snaps = reg.find(GraphSnapshot, graph_id=g.id)
-            doc: dict[str, object] = {**_graph_row(g), "spec": to_jsonable(g.spec), "snapshots": [_snapshot_row(s) for s in snaps]}  # fmt: skip
+            doc: dict[str, object] = {
+                **_graph_row(g),
+                "spec": to_jsonable(g.spec),
+                "snapshots": [_snapshot_row(s) for s in snaps],
+            }
             _emit(doc, f"{g.id} {g.name} {g.version}: {len(snaps)} snapshot(s)", args)
         else:
             s = resolve_snapshot(reg, args.id)
@@ -2072,7 +2189,11 @@ def _cmd_graph_inspect(args: argparse.Namespace) -> int:
                 "nodes_by_kind": _count_by(n.node_kind.value for n in idx.nodes.values()),
                 "edges_by_relation": _count_by(e.relation.value for e in idx.edges.values()),
             }
-            _emit(doc, f"{s.id}: {s.node_count} node(s), {s.edge_count} edge(s), {s.unresolved_count} unresolved", args)  # fmt: skip
+            _emit(
+                doc,
+                f"{s.id}: {s.node_count} node(s), {s.edge_count} edge(s), {s.unresolved_count} unresolved",
+                args,
+            )
     return 0
 
 
@@ -2104,7 +2225,7 @@ def _resolve_node(idx: SnapshotIndex, ref: str) -> str:
 
 
 def _emit_traversal(result: GraphTraversalResult, args: argparse.Namespace, label: str) -> int:
-    text = f"{label}: {len(result.nodes)} node(s), {len(result.edges)} edge(s), truncated={result.truncated}"  # fmt: skip
+    text = f"{label}: {len(result.nodes)} node(s), {len(result.edges)} edge(s), truncated={result.truncated}"
     _emit(result.to_dict(), text, args)
     return 0
 
@@ -2127,7 +2248,11 @@ def _cmd_graph_path(args: argparse.Namespace) -> int:
         query = _graph_query_parser_kwargs(args)
         direction = TraversalDirection(args.direction)
         result = idx.path(a, b, direction, query)
-        _emit(result.to_dict(), f"path {args.a} -> {args.b}: {'found' if result.found else 'not found'} (truncated={result.truncated})", args)  # fmt: skip
+        _emit(
+            result.to_dict(),
+            f"path {args.a} -> {args.b}: {'found' if result.found else 'not found'} (truncated={result.truncated})",
+            args,
+        )
         return 0 if result.found else 1
 
 
@@ -2155,11 +2280,21 @@ def _cmd_graph_query(args: argparse.Namespace) -> int:
             s = resolve_snapshot(reg, args.snapshot)
             idx = SnapshotIndex(reg, s.id)
             query = _graph_query_parser_kwargs(args)
-            fn = model_to_failure_paths if args.name == "model-to-failure" else dataset_to_failure_paths  # fmt: skip
+            fn = (
+                model_to_failure_paths
+                if args.name == "model-to-failure"
+                else dataset_to_failure_paths
+            )
             result = fn(idx, args.node, args.node2, query)
-            _emit(result.to_dict(), f"{args.name} {args.node} -> {args.node2}: {'found' if result.found else 'not found'}", args)  # fmt: skip
+            _emit(
+                result.to_dict(),
+                f"{args.name} {args.node} -> {args.node2}: {'found' if result.found else 'not found'}",
+                args,
+            )
             return 0 if result.found else 1
-    raise ExperionyxError(f"unknown query {args.name!r}; choose one of {sorted({*_GRAPH_QUERIES, 'model-to-failure', 'dataset-to-failure'})}")  # fmt: skip
+    raise ExperionyxError(
+        f"unknown query {args.name!r}; choose one of {sorted({*_GRAPH_QUERIES, 'model-to-failure', 'dataset-to-failure'})}"
+    )
 
 
 def _cmd_graph_diff(args: argparse.Namespace) -> int:
@@ -2167,7 +2302,7 @@ def _cmd_graph_diff(args: argparse.Namespace) -> int:
         a = resolve_snapshot(reg, args.a)
         b = resolve_snapshot(reg, args.b)
         result = graph_diff_snapshots(reg, a.id, b.id)
-        text = f"diff {a.id} -> {b.id}: +{len(result.added_nodes)}/-{len(result.removed_nodes)} node(s), +{len(result.added_edges)}/-{len(result.removed_edges)} edge(s)"  # fmt: skip
+        text = f"diff {a.id} -> {b.id}: +{len(result.added_nodes)}/-{len(result.removed_nodes)} node(s), +{len(result.added_edges)}/-{len(result.removed_edges)} edge(s)"
         _emit(result.to_dict(), text, args)
     return 0
 
@@ -2176,8 +2311,11 @@ def _cmd_graph_replay(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         s = resolve_snapshot(reg, args.id)
         out = graph_replay_check(
-            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), s.id
-        )  # fmt: skip
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            s.id,
+        )
         _dump(out)
         return 0 if out["deterministic"] is True else 1
 
@@ -2200,6 +2338,243 @@ def _attempt_full(a: ReproductionAttempt) -> dict[str, object]:
     return {"id": a.id, **a.to_dict()}
 
 
+def _report_row(r: Report) -> dict[str, object]:
+    return {
+        "id": r.id,
+        "report_type": r.report_type.value,
+        "investigation_id": r.investigation_id,
+        "status": r.status.value,
+        "title": r.title,
+        "generated_at": r.generated_at.isoformat(),
+        "evidence_gaps": len(r.evidence_gaps),
+    }
+
+
+def _cmd_report_generate(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        report_type = ReportType(args.report_type)
+        template_id = args.template_id or ensure_template(reg, builtin_template(report_type))
+        spec = ReportSpec(
+            report_type,
+            args.investigation,
+            template_id,
+            tuple(args.run or ()),
+            tuple(args.statistical_analysis or ()),
+        )
+        result = generate_report(reg, spec)
+        report = reg.get(Report, result.report_id)
+        _emit(
+            {
+                "id": report.id,
+                **report.to_dict(),
+                "finding_ids": list(result.finding_ids),
+                "warnings": list(result.warnings),
+            },
+            f"{report.id}: {report.status.value}",
+            args,
+        )
+    return 0
+
+
+def _cmd_report_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        filters = {"investigation_id": args.investigation} if args.investigation else {}
+        reports = reg.find(Report, **filters)
+        _dump([_report_row(r) for r in reports])
+    return 0
+
+
+def _cmd_report_show(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        report = reg.get(Report, args.id)
+        _emit({"id": report.id, **report.to_dict()}, f"{report.id}: {report.status.value}", args)
+    return 0
+
+
+def _cmd_report_sections(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        report = reg.get(Report, args.id)
+        _dump([s.to_dict() for s in report.sections])
+    return 0
+
+
+def _cmd_report_claims(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        reg.get(Report, args.id)  # NotFoundError if the report does not exist
+        findings = reg.find(ReportFinding, report_id=args.id)
+        _dump([{"id": f.id, **f.to_dict()} for f in findings])
+    return 0
+
+
+def _cmd_report_validate(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        issues = report_validate(reg, args.id)
+        _dump([{"severity": i.severity, "code": i.code, "message": i.message} for i in issues])
+    return 1 if any(i.severity == "ERROR" for i in issues) else 0
+
+
+def _cmd_report_export(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        report = reg.get(Report, args.id)
+        text = (
+            render_html(reg, report)
+            if args.export_format == "html"
+            else render_markdown(reg, report)
+        )
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        print(text)
+    return 0
+
+
+def _dossier_row(d: EvidenceDossier) -> dict[str, object]:
+    return {
+        "id": d.id,
+        "investigation_id": d.investigation_id,
+        "research_question": d.research_question,
+        "source_kind": d.source_kind.value,
+        "source_id": d.source_id,
+        "reports": len(d.report_ids),
+        "evidence_gaps": len(d.evidence_gaps),
+        "created_at": d.created_at.isoformat(),
+    }
+
+
+def _cmd_dossier_build(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        explicit = tuple((x.split(":", 1)[0], x.split(":", 1)[1]) for x in (args.evidence or ()))
+        spec = DossierSpec(
+            args.investigation,
+            args.question,
+            DossierSourceKind(args.source_kind),
+            args.source_id or args.investigation,
+            explicit,
+        )
+        result = build_dossier(reg, spec)
+        dossier = reg.get(EvidenceDossier, result.dossier_id)
+        doc = {
+            "id": dossier.id,
+            **dossier.to_dict(),
+            "item_ids": list(result.item_ids),
+            "finding_ids": list(result.finding_ids),
+            "warnings": list(result.warnings),
+        }
+        _emit(
+            doc,
+            f"{dossier.id}: {len(result.item_ids)} items, {len(result.finding_ids)} findings",
+            args,
+        )
+    return 0
+
+
+def _cmd_dossier_list(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        filters = {"investigation_id": args.investigation} if args.investigation else {}
+        dossiers = reg.find(EvidenceDossier, **filters)
+        _dump([_dossier_row(d) for d in dossiers])
+    return 0
+
+
+def _cmd_dossier_show(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        dossier = reg.get(EvidenceDossier, args.id)
+        _emit({"id": dossier.id, **dossier.to_dict()}, f"{dossier.id}", args)
+    return 0
+
+
+def _cmd_dossier_items(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        reg.get(EvidenceDossier, args.id)
+        items = reg.find(DossierItem, dossier_id=args.id)
+        _dump([{"id": i.id, **i.to_dict()} for i in items])
+    return 0
+
+
+def _cmd_dossier_findings(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        reg.get(EvidenceDossier, args.id)
+        findings = reg.find(DossierFinding, dossier_id=args.id)
+        _dump([{"id": f.id, **f.to_dict()} for f in findings])
+    return 0
+
+
+def _cmd_dossier_snapshot(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        snapshot_id = build_dossier_snapshot(reg, args.id)
+        snapshot = reg.get(DossierSnapshot, snapshot_id)
+        _emit({"id": snapshot.id, **snapshot.to_dict()}, snapshot.id, args)
+    return 0
+
+
+def _cmd_dossier_validate(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        reg.get(EvidenceDossier, args.id)
+        findings = reg.find(DossierFinding, dossier_id=args.id)
+    unresolved = [
+        f
+        for f in findings
+        if f.status.value
+        in (
+            "UNSUPPORTED",
+            "MISSING_EXPECTED_EVIDENCE",
+            "CONFLICTING_EVIDENCE",
+            "PROVENANCE_GAP",
+            "REPRODUCIBILITY_GAP",
+            "STALE_EVIDENCE",
+            "UNAVAILABLE_EVIDENCE",
+        )
+    ]
+    _dump([{"id": f.id, "status": f.status.value, "statement": f.statement} for f in unresolved])
+    return (
+        1
+        if any(f.status.value in ("UNAVAILABLE_EVIDENCE", "STALE_EVIDENCE") for f in unresolved)
+        else 0
+    )
+
+
+def _cmd_dossier_export(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        dossier = reg.get(EvidenceDossier, args.id)
+        items = reg.find(DossierItem, dossier_id=args.id)
+        findings = reg.find(DossierFinding, dossier_id=args.id)
+        lines = [
+            f"# Evidence Dossier: {dossier.research_question}",
+            "",
+            f"- **Dossier ID:** `{dossier.id}`",
+            f"- **Investigation:** `{dossier.investigation_id}`",
+            f"- **Source:** {dossier.source_kind.value} `{dossier.source_id}`",
+            f"- **Reports:** {', '.join(dossier.report_ids) or 'none'}",
+            f"- **Evidence digest:** `{dossier.source_evidence_digest}`",
+            "",
+            "## Findings (sufficiency analysis)",
+            "",
+            "| ID | Status | Statement |",
+            "| --- | --- | --- |",
+            *(
+                f"| `{f.id}` | {f.status.value} | {f.statement} |"
+                for f in sorted(findings, key=lambda f: f.id)
+            ),
+            "",
+            "## Evidence Items",
+            "",
+            *(
+                f"- `{i.id}` ({i.item_kind.value}/{i.source_kind}): `{i.source_id}`"
+                for i in sorted(items, key=lambda i: i.id)
+            ),
+            "",
+            "## Limitations",
+            "",
+            *(f"- {x}" for x in dossier.limitations),
+        ]
+        text = "\n".join(lines)
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        print(text)
+    return 0
+
+
 def _cmd_reproduce_validate(args: argparse.Namespace) -> int:
     kind = TargetKind(args.target_kind)
     with _open(args.workspace) as reg:
@@ -2215,24 +2590,40 @@ def _cmd_reproduce_validate(args: argparse.Namespace) -> int:
 def _cmd_reproduce_run(args: argparse.Namespace) -> int:
     kind = TargetKind(args.target_kind)
     mode = ReproductionMode(args.mode)
-    spec = ReproductionSpec(kind, args.target_id, mode, args.relative_tolerance, args.absolute_tolerance)  # fmt: skip
+    spec = ReproductionSpec(
+        kind, args.target_id, mode, args.relative_tolerance, args.absolute_tolerance
+    )
     with _open(args.workspace) as reg:
         if kind is TargetKind.SCHEDULE:
             result = run_reproduction(
-                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), spec,
+                reg,
+                LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                _executor(reg, args.workspace),
+                spec,
                 investigation_id=args.investigation,
                 open_registry=_scheduler_open_registry(args.workspace),
                 open_executor=_scheduler_open_executor(args.workspace),
                 source_root=Path.cwd(),
-            )  # fmt: skip
+            )
         else:
             result = run_reproduction(
-                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), spec,
+                reg,
+                LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+                _executor(reg, args.workspace),
+                spec,
                 investigation_id=args.investigation,
-            )  # fmt: skip
+            )
         attempt = reg.get(ReproductionAttempt, result.attempt_id)
-        _emit(_attempt_full(attempt), f"{attempt.id}: {attempt.outcome.value} (mode {mode.value})", args)  # fmt: skip
-    return 0 if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL) else 1  # fmt: skip
+        _emit(
+            _attempt_full(attempt),
+            f"{attempt.id}: {attempt.outcome.value} (mode {mode.value})",
+            args,
+        )
+    return (
+        0
+        if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL)
+        else 1
+    )
 
 
 def _cmd_reproduce_inspect(args: argparse.Namespace) -> int:
@@ -2245,17 +2636,24 @@ def _cmd_reproduce_inspect(args: argparse.Namespace) -> int:
 def _cmd_reproduce_compare(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         out = reproduction_compare(
-            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
-            args.run_a, args.path_a, args.run_b, args.path_b,
-            relative_tolerance=args.relative_tolerance, absolute_tolerance=args.absolute_tolerance,
-        )  # fmt: skip
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            args.run_a,
+            args.path_a,
+            args.run_b,
+            args.path_b,
+            relative_tolerance=args.relative_tolerance,
+            absolute_tolerance=args.absolute_tolerance,
+        )
         _dump(out)
     return 0 if out["outcome"] in ("EQUAL", "APPROXIMATELY_EQUAL") else 1
 
 
 def _cmd_reproduce_verify(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        out = reproduction_verify(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.run_id)  # fmt: skip
+        out = reproduction_verify(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.run_id
+        )
         _dump(out)
     return 1 if out["corrupted"] else 0
 
@@ -2267,23 +2665,34 @@ def _cmd_reproduce_replay(args: argparse.Namespace) -> int:
         store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
         if prior.target_kind is TargetKind.SCHEDULE:
             result = run_reproduction(
-                reg, store, _executor(reg, args.workspace), spec,
+                reg,
+                store,
+                _executor(reg, args.workspace),
+                spec,
                 investigation_id=prior.investigation_id,
                 open_registry=_scheduler_open_registry(args.workspace),
                 open_executor=_scheduler_open_executor(args.workspace),
                 source_root=Path.cwd(),
-            )  # fmt: skip
+            )
         else:
             result = run_reproduction(
-                reg, store, _executor(reg, args.workspace), spec, investigation_id=prior.investigation_id
-            )  # fmt: skip
+                reg,
+                store,
+                _executor(reg, args.workspace),
+                spec,
+                investigation_id=prior.investigation_id,
+            )
         attempt = reg.get(ReproductionAttempt, result.attempt_id)
         _emit(
             _attempt_full(attempt),
             f"replay of {prior.id} -> {attempt.id}: {attempt.outcome.value}",
             args,
         )
-    return 0 if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL) else 1  # fmt: skip
+    return (
+        0
+        if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL)
+        else 1
+    )
 
 
 def _cmd_reproduce_diff(args: argparse.Namespace) -> int:
@@ -2381,21 +2790,29 @@ def _stats_sources(args: argparse.Namespace) -> dict[str, object]:
         return {"kind": "inline", **doc}
     if getattr(args, "fault_experiment", None):
         return {
-            "kind": "fault_trials", "fault_experiment_id": args.fault_experiment,
-            "metric": args.measure, "point_index": args.point_index,
-            "reference_field": args.reference_field, "treatment_field": args.treatment_field,
-        }  # fmt: skip
+            "kind": "fault_trials",
+            "fault_experiment_id": args.fault_experiment,
+            "metric": args.measure,
+            "point_index": args.point_index,
+            "reference_field": args.reference_field,
+            "treatment_field": args.treatment_field,
+        }
     if getattr(args, "interaction", None):
         return {
-            "kind": "interaction", "analysis_id": args.interaction, "measure": args.measure,
-            "reference_cell": args.reference_cell, "treatment_cell": args.treatment_cell,
-        }  # fmt: skip
+            "kind": "interaction",
+            "analysis_id": args.interaction,
+            "measure": args.measure,
+            "reference_cell": args.reference_cell,
+            "treatment_cell": args.treatment_cell,
+        }
     if getattr(args, "artifact", None):
         run_id, path = args.artifact
         out: dict[str, object] = {
-            "kind": "artifact", "run_id": run_id, "path": path,
+            "kind": "artifact",
+            "run_id": run_id,
+            "path": path,
             "reference": args.reference_pointer.split("/"),
-        }  # fmt: skip
+        }
         if args.treatment_pointer:
             out["treatment"] = args.treatment_pointer.split("/")
         return out
@@ -2416,9 +2833,15 @@ def _stats_run(
         store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
         a, new = stats_store.create(reg, store, kind, sources, cfg)
         _emit(
-            {**_stats_row(a), "new": new, "config": to_jsonable(a.config), "result": to_jsonable(a.result)},
-            f"{a.id} {kind} {a.analysis_status}{'' if new else ' (already registered)'}", args,
-        )  # fmt: skip
+            {
+                **_stats_row(a),
+                "new": new,
+                "config": to_jsonable(a.config),
+                "result": to_jsonable(a.result),
+            },
+            f"{a.id} {kind} {a.analysis_status}{'' if new else ' (already registered)'}",
+            args,
+        )
     return 0
 
 
@@ -2479,7 +2902,13 @@ def _cmd_stats_list(args: argparse.Namespace) -> int:
 def _cmd_stats_inspect(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         a = reg.get(StatisticalAnalysis, args.id)
-    doc = {**_stats_row(a), "config": to_jsonable(a.config), "sources": to_jsonable(a.sources), "result": to_jsonable(a.result), "result_hash": a.result_hash}  # fmt: skip
+    doc = {
+        **_stats_row(a),
+        "config": to_jsonable(a.config),
+        "sources": to_jsonable(a.sources),
+        "result": to_jsonable(a.result),
+        "result_hash": a.result_hash,
+    }
     _emit(doc, f"{a.id} {a.analysis_kind} {a.analysis_status} inputs {a.input_hash[7:19]}", args)
     return 0
 
@@ -2521,16 +2950,44 @@ def _summary_slices(a: SliceAnalysis) -> dict[str, Any]:
 
 
 def _analysis_row(a: SliceAnalysis) -> dict[str, object]:
-    return {"id": a.id, "status": a.analysis_status, "baseline_run_id": a.baseline_run_id, "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id, "slices": sorted(_summary_slices(a))}  # fmt: skip
+    return {
+        "id": a.id,
+        "status": a.analysis_status,
+        "baseline_run_id": a.baseline_run_id,
+        "dataset_fingerprint": a.dataset_fingerprint,
+        "spec_id": a.spec_id,
+        "slices": sorted(_summary_slices(a)),
+    }
 
 
 def _cmd_slice_validate(args: argparse.Namespace) -> int:
     doc = json.loads(Path(args.spec).read_text(encoding="utf-8"))
     if isinstance(doc, dict) and "baseline_run" in doc:
         spec = SliceAnalysisSpec.from_dict(doc)
-        out: dict[str, object] = {"valid": True, "kind": "analysis", "spec_id": spec.spec_id, "slices": [{"name": s.name, "slice_id": s.slice_id, "description": s.human, "static": s.static} for s in spec.slices]}  # fmt: skip
+        out: dict[str, object] = {
+            "valid": True,
+            "kind": "analysis",
+            "spec_id": spec.spec_id,
+            "slices": [
+                {"name": s.name, "slice_id": s.slice_id, "description": s.human, "static": s.static}
+                for s in spec.slices
+            ],
+        }
     else:
-        out = {"valid": True, "kind": "slices", "slices": [{"name": s.name, "slice_id": s.slice_id, "description": s.human, "fields": list(s.fields), "static": s.static} for s in _slice_specs(args.spec)]}  # fmt: skip
+        out = {
+            "valid": True,
+            "kind": "slices",
+            "slices": [
+                {
+                    "name": s.name,
+                    "slice_id": s.slice_id,
+                    "description": s.human,
+                    "fields": list(s.fields),
+                    "static": s.static,
+                }
+                for s in _slice_specs(args.spec)
+            ],
+        }
     _emit(out, "VALID: " + ", ".join(f"{s['name']} = {s['slice_id']}" for s in out["slices"]), args)  # type: ignore[attr-defined]
     return 0
 
@@ -2658,7 +3115,13 @@ def _cmd_slice_analyze(args: argparse.Namespace) -> int:
             spec,
         )
         a = reg.get(SliceAnalysis, out.analysis_id) if out.analysis_id else None
-    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "summary": None if a is None else to_jsonable(a.summary),
+    }
     _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
     return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
 
@@ -2744,14 +3207,24 @@ def _pairs(a: DriftAnalysis) -> dict[str, Any]:
 
 def _drift_row(a: DriftAnalysis) -> dict[str, object]:
     return {
-        "id": a.id, "status": a.analysis_status, "baseline_run_id": a.baseline_run_id,
-        "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id,
-        "provenance_fingerprint": a.provenance_fingerprint, "window_pairs": sorted(_pairs(a)),
-    }  # fmt: skip
+        "id": a.id,
+        "status": a.analysis_status,
+        "baseline_run_id": a.baseline_run_id,
+        "dataset_fingerprint": a.dataset_fingerprint,
+        "spec_id": a.spec_id,
+        "provenance_fingerprint": a.provenance_fingerprint,
+        "window_pairs": sorted(_pairs(a)),
+    }
 
 
 def _window_row(w: DriftWindow) -> dict[str, object]:
-    return {"id": w.id, "name": w.name, "role": w.role, "ordering": w.ordering_field, "window": w.window().describe()}  # fmt: skip
+    return {
+        "id": w.id,
+        "name": w.name,
+        "role": w.role,
+        "ordering": w.ordering_field,
+        "window": w.window().describe(),
+    }
 
 
 def _cmd_drift_validate(args: argparse.Namespace) -> int:
@@ -2802,10 +3275,20 @@ def _cmd_drift_validate(args: argparse.Namespace) -> int:
 def _cmd_drift_list(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         dr = _dreg(args, reg)
-        cols = {k: v for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status)) if v}  # fmt: skip
+        cols = {
+            k: v
+            for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status))
+            if v
+        }
         analyses = [_drift_row(a) for a in dr.analyses(**cols)]
-        windows = [_window_row(w) for w in dr.windows(ordering=args.ordering)] if args.windows else []  # fmt: skip
-    _emit({"analyses": analyses, **({"windows": windows} if args.windows else {})}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in analyses), args)  # fmt: skip
+        windows = (
+            [_window_row(w) for w in dr.windows(ordering=args.ordering)] if args.windows else []
+        )
+    _emit(
+        {"analyses": analyses, **({"windows": windows} if args.windows else {})},
+        "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in analyses),
+        args,
+    )
     return 0
 
 
@@ -2814,13 +3297,43 @@ def _cmd_drift_inspect(args: argparse.Namespace) -> int:
         dr = _dreg(args, reg)
         if args.id.startswith("twn_"):
             w = dr.window(args.id)
-            used = [a.id for a in dr.analyses() if any(args.id in (p["reference_window_id"], p["comparison_window_id"]) for p in _pairs(a).values())]  # fmt: skip
-            doc: dict[str, object] = {**_window_row(w), "drift_schema": w.drift_schema, "start": w.start, "end": w.end, "start_inclusive": w.start_inclusive, "end_inclusive": w.end_inclusive, "used_by": used}  # fmt: skip
+            used = [
+                a.id
+                for a in dr.analyses()
+                if any(
+                    args.id in (p["reference_window_id"], p["comparison_window_id"])
+                    for p in _pairs(a).values()
+                )
+            ]
+            doc: dict[str, object] = {
+                **_window_row(w),
+                "drift_schema": w.drift_schema,
+                "start": w.start,
+                "end": w.end,
+                "start_inclusive": w.start_inclusive,
+                "end_inclusive": w.end_inclusive,
+                "used_by": used,
+            }
         else:
             a = dr.analysis(args.id)
-            doc = {**_drift_row(a), "summary": to_jsonable(a.summary), "provenance": dr.provenance(a.id), "artifacts": [{"path": x.path, "id": x.id} for x in dr.artifacts(a.id)]}  # fmt: skip
+            doc = {
+                **_drift_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": dr.provenance(a.id),
+                "artifacts": [{"path": x.path, "id": x.id} for x in dr.artifacts(a.id)],
+            }
             if args.full:
-                doc["documents"] = {n: dr.document(a.id, n) for n in ("spec", "windows", "feature_results", "distribution_results", "performance_results", "summary")}  # fmt: skip
+                doc["documents"] = {
+                    n: dr.document(a.id, n)
+                    for n in (
+                        "spec",
+                        "windows",
+                        "feature_results",
+                        "distribution_results",
+                        "performance_results",
+                        "summary",
+                    )
+                }
     _emit(doc, f"{args.id}: {doc.get('window') or doc.get('status')}", args)
     return 0
 
@@ -2828,7 +3341,12 @@ def _cmd_drift_inspect(args: argparse.Namespace) -> int:
 def _cmd_drift_windows(args: argparse.Namespace) -> int:
     spec = _drift_spec(args.spec)
     with _open(args.workspace) as reg:
-        res = drift_engine.preflight(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), spec, _drift_dataset(args, reg, spec))  # fmt: skip
+        res = drift_engine.preflight(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            spec,
+            _drift_dataset(args, reg, spec),
+        )
     oid = spec.ordering.field
     rows: list[dict[str, Any]] = []
     for w in res.windows.values():
@@ -2836,7 +3354,15 @@ def _cmd_drift_windows(args: argparse.Namespace) -> int:
         if not args.ids:
             d["sample_ids"] = f"{w.n} sample IDs omitted (use --ids)"
         rows.append(d)
-    doc: dict[str, object] = {"spec_id": spec.spec_id, "ordering": oid, "windows": rows, "pairs": [{"key": k, "reference_window_id": r, "comparison_window_id": c} for k, r, c in res.pairs], "skipped": [s.to_dict(oid) for s in res.skipped]}  # fmt: skip
+    doc: dict[str, object] = {
+        "spec_id": spec.spec_id,
+        "ordering": oid,
+        "windows": rows,
+        "pairs": [
+            {"key": k, "reference_window_id": r, "comparison_window_id": c} for k, r, c in res.pairs
+        ],
+        "skipped": [s.to_dict(oid) for s in res.skipped],
+    }
     _emit(
         doc,
         "\n".join(f"{r['window_id']} {r['window']['role']} n={r['n_samples']}" for r in rows),
@@ -2850,9 +3376,22 @@ def _cmd_drift_evaluate(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         run = reg.get(Run, spec.baseline_run)
         inv = reg.get(Experiment, run.experiment_id).investigation_id
-        out = drift_engine.run_drift_request(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), inv, spec, dataset=_drift_dataset(args, reg, spec))  # fmt: skip
+        out = drift_engine.run_drift_request(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            inv,
+            spec,
+            dataset=_drift_dataset(args, reg, spec),
+        )
         a = reg.get(DriftAnalysis, out.analysis_id) if out.analysis_id else None
-    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "summary": None if a is None else to_jsonable(a.summary),
+    }
     _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
     return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
 
@@ -2864,16 +3403,29 @@ def _cmd_drift_compare(args: argparse.Namespace) -> int:
         store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
         drift_engine.validate(reg, spec)
         c = drift_engine.compute(reg, store, spec, _drift_dataset(args, reg, spec))
-    doc: dict[str, object] = {"spec_id": spec.spec_id, "summary": drift_engine.summarize(spec, c), "not_stored": "nothing was stored; use `drift evaluate` to record this analysis"}  # fmt: skip
+    doc: dict[str, object] = {
+        "spec_id": spec.spec_id,
+        "summary": drift_engine.summarize(spec, c),
+        "not_stored": "nothing was stored; use `drift evaluate` to record this analysis",
+    }
     if args.full:
-        doc["feature_results"], doc["distribution_results"], doc["performance_results"] = c.feature_results, c.distribution_results, c.performance_results  # fmt: skip
+        doc["feature_results"], doc["distribution_results"], doc["performance_results"] = (
+            c.feature_results,
+            c.distribution_results,
+            c.performance_results,
+        )
     _emit(doc, f"{len(c.resolution.pairs)} window pair(s) compared (not stored)", args)
     return 0
 
 
 def _cmd_drift_replay(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        out = drift_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id)  # fmt: skip
+        out = drift_engine.replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            args.id,
+        )
     _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
     return 0 if out["deterministic"] else 1
 
@@ -2902,20 +3454,49 @@ def _quality_dataset(args: argparse.Namespace, reg: SqliteRegistry, spec: Qualit
 
 
 def _quality_row(a: QualityAnalysis) -> dict[str, object]:
-    return {"id": a.id, "status": a.analysis_status, "dataset_id": a.dataset_id, "dataset_fingerprint": a.dataset_fingerprint, "spec_id": a.spec_id, "provenance_fingerprint": a.provenance_fingerprint, "status_counts": to_jsonable(a.summary.get("status_counts"))}  # fmt: skip
+    return {
+        "id": a.id,
+        "status": a.analysis_status,
+        "dataset_id": a.dataset_id,
+        "dataset_fingerprint": a.dataset_fingerprint,
+        "spec_id": a.spec_id,
+        "provenance_fingerprint": a.provenance_fingerprint,
+        "status_counts": to_jsonable(a.summary.get("status_counts")),
+    }
 
 
 def _check_row(c: QualityCheck) -> dict[str, object]:
-    return {"id": c.id, "check_id": c.check_id, "check_type": c.check_type, "scope": c.scope, "status": c.status, "reason": c.reason}  # fmt: skip
+    return {
+        "id": c.id,
+        "check_id": c.check_id,
+        "check_type": c.check_type,
+        "scope": c.scope,
+        "status": c.status,
+        "reason": c.reason,
+    }
 
 
 def _cmd_quality_validate(args: argparse.Namespace) -> int:
     spec = _quality_spec(args.spec)
-    out: dict[str, object] = {"valid": True, "spec_id": spec.spec_id, "dataset_id": spec.dataset_id, "checks": [{"check_id": c.check_id, "type": c.type} for c in spec.checks], "splits": list(spec.splits), "features": {f.name: f.kind for f in spec.features}, "slices": {s.name: s.slice_id for s in spec.slices}, "config": spec.config.to_dict()}  # fmt: skip
+    out: dict[str, object] = {
+        "valid": True,
+        "spec_id": spec.spec_id,
+        "dataset_id": spec.dataset_id,
+        "checks": [{"check_id": c.check_id, "type": c.type} for c in spec.checks],
+        "splits": list(spec.splits),
+        "features": {f.name: f.kind for f in spec.features},
+        "slices": {s.name: s.slice_id for s in spec.slices},
+        "config": spec.config.to_dict(),
+    }
     if args.preflight:
         with _open(args.workspace) as reg:
             tables = quality_engine.preflight(reg, spec, _quality_dataset(args, reg, spec))
-        out["preflight"] = {"ok": True, "splits": {str(s): {"n_rows": t.n, "sample_digest": t.digest()} for s, t in tables.items()}}  # fmt: skip
+        out["preflight"] = {
+            "ok": True,
+            "splits": {
+                str(s): {"n_rows": t.n, "sample_digest": t.digest()} for s, t in tables.items()
+            },
+        }
     _emit(out, f"VALID: {spec.spec_id}: {len(spec.checks)} check(s)", args)
     return 0
 
@@ -2946,9 +3527,17 @@ def _cmd_quality_inspect(args: argparse.Namespace) -> int:
             }
         else:
             a = qr.analysis(args.id)
-            doc = {**_quality_row(a), "summary": to_jsonable(a.summary), "provenance": qr.provenance(a.id), "artifacts": [{"path": x.path, "id": x.id} for x in qr.artifacts(a.id)]}  # fmt: skip
+            doc = {
+                **_quality_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": qr.provenance(a.id),
+                "artifacts": [{"path": x.path, "id": x.id} for x in qr.artifacts(a.id)],
+            }
             if args.full:
-                doc["documents"] = {n: qr.document(a.id, n) for n in ("spec", "checks", "observations", "violations", "summary")}  # fmt: skip
+                doc["documents"] = {
+                    n: qr.document(a.id, n)
+                    for n in ("spec", "checks", "observations", "violations", "summary")
+                }
     _emit(doc, f"{args.id}: {doc.get('status')}", args)
     return 0
 
@@ -2973,9 +3562,22 @@ def _cmd_quality_run(args: argparse.Namespace) -> int:
     spec = _quality_spec(args.spec)
     with _open(args.workspace) as reg:
         inv = quality_engine.baseline_investigation(reg, args.investigation)
-        out = quality_engine.run_quality_request(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), inv, spec, dataset=_quality_dataset(args, reg, spec))  # fmt: skip
+        out = quality_engine.run_quality_request(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            inv,
+            spec,
+            dataset=_quality_dataset(args, reg, spec),
+        )
         a = reg.get(QualityAnalysis, out.analysis_id) if out.analysis_id else None
-    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "summary": None if a is None else to_jsonable(a.summary),
+    }
     _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
     counts = {} if a is None else dict(a.summary.get("status_counts", {}))  # type: ignore[call-overload]
     return 0 if a is not None and a.analysis_status == "COMPLETE" and not counts.get("FAIL") else 3
@@ -2983,7 +3585,12 @@ def _cmd_quality_run(args: argparse.Namespace) -> int:
 
 def _cmd_quality_replay(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        out = quality_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id)  # fmt: skip
+        out = quality_engine.replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            args.id,
+        )
     _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
     return 0 if out["deterministic"] else 1
 
@@ -3006,15 +3613,51 @@ def _sxreg(args: argparse.Namespace, reg: SqliteRegistry) -> StressRegistry:
 
 
 def _stress_row(a: StressAnalysis) -> dict[str, object]:
-    return {"id": a.id, "status": a.analysis_status, "spec_id": a.spec_id, "model_id": a.model_id, "dataset_id": a.dataset_id, "baseline_run_id": a.baseline_run_id, "provenance_fingerprint": a.provenance_fingerprint, "design": a.summary.get("design"), "families": to_jsonable(a.summary.get("families")), "coverage": to_jsonable(a.summary.get("coverage"))}  # fmt: skip
+    return {
+        "id": a.id,
+        "status": a.analysis_status,
+        "spec_id": a.spec_id,
+        "model_id": a.model_id,
+        "dataset_id": a.dataset_id,
+        "baseline_run_id": a.baseline_run_id,
+        "provenance_fingerprint": a.provenance_fingerprint,
+        "design": a.summary.get("design"),
+        "families": to_jsonable(a.summary.get("families")),
+        "coverage": to_jsonable(a.summary.get("coverage")),
+    }
 
 
 def _trial_row(t: StressTrial) -> dict[str, object]:
-    return {"id": t.id, "unit_key": t.unit_key, "point_index": t.point_index, "repeat_index": t.repeat_index, "cell": t.cell, "family": t.family, "stress_ids": list(t.stress_ids), "origin": t.origin, "seed": t.seed, "status": t.status, "run_id": t.run_id, "reason": t.reason}  # fmt: skip
+    return {
+        "id": t.id,
+        "unit_key": t.unit_key,
+        "point_index": t.point_index,
+        "repeat_index": t.repeat_index,
+        "cell": t.cell,
+        "family": t.family,
+        "stress_ids": list(t.stress_ids),
+        "origin": t.origin,
+        "seed": t.seed,
+        "status": t.status,
+        "run_id": t.run_id,
+        "reason": t.reason,
+    }
 
 
 def _cmd_stress_families(args: argparse.Namespace) -> int:
-    rows = {n: {"origin": f.origin.value, "target": f.target, "description": f.description, "fault_type": f.fault_type, "default_sweep_parameter": f.default_sweep, "parameters": {k: {"kind": p.kind, "required": p.required} for k, p in f.params.items()}} for n, f in sorted(STRESS_FAMILIES.items())}  # fmt: skip
+    rows = {
+        n: {
+            "origin": f.origin.value,
+            "target": f.target,
+            "description": f.description,
+            "fault_type": f.fault_type,
+            "default_sweep_parameter": f.default_sweep,
+            "parameters": {
+                k: {"kind": p.kind, "required": p.required} for k, p in f.params.items()
+            },
+        }
+        for n, f in sorted(STRESS_FAMILIES.items())
+    }
     _emit(
         {"families": rows},
         "\n".join(f"{n}: {r['origin']} - {r['description']}" for n, r in rows.items()),
@@ -3026,7 +3669,26 @@ def _cmd_stress_families(args: argparse.Namespace) -> int:
 def _cmd_stress_validate(args: argparse.Namespace) -> int:
     d = _stress_design(args.spec)
     units = d.plan.units()
-    out: dict[str, object] = {"valid": True, "spec_id": d.spec_id, "plan_id": d.plan.plan_id, "design": d.plan.design, "origin": d.plan.origin.value, "stress_ids": [c.stress_id for c in d.plan.components], "n_trials": len(units), "units": [{"key": u.key, "point_index": u.point_index, "repeat_index": u.repeat_index, "cell": u.cell, "seed": u.seed, "value": u.value} for u in units]}  # fmt: skip
+    out: dict[str, object] = {
+        "valid": True,
+        "spec_id": d.spec_id,
+        "plan_id": d.plan.plan_id,
+        "design": d.plan.design,
+        "origin": d.plan.origin.value,
+        "stress_ids": [c.stress_id for c in d.plan.components],
+        "n_trials": len(units),
+        "units": [
+            {
+                "key": u.key,
+                "point_index": u.point_index,
+                "repeat_index": u.repeat_index,
+                "cell": u.cell,
+                "seed": u.seed,
+                "value": u.value,
+            }
+            for u in units
+        ],
+    }
     if args.preflight:
         with _open(args.workspace) as reg:
             out["capabilities"] = stress_engine.preflight(reg, d, _executor(reg, args.workspace))
@@ -3036,7 +3698,15 @@ def _cmd_stress_validate(args: argparse.Namespace) -> int:
 
 def _cmd_stress_list(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        cols = {k: v for k, v in (("model_id", args.model_id), ("dataset_id", args.dataset_id), ("analysis_status", args.status)) if v}  # fmt: skip
+        cols = {
+            k: v
+            for k, v in (
+                ("model_id", args.model_id),
+                ("dataset_id", args.dataset_id),
+                ("analysis_status", args.status),
+            )
+            if v
+        }
         rows = [_stress_row(a) for a in _sxreg(args, reg).analyses(**cols)]
     _emit(
         {"analyses": rows},
@@ -3058,9 +3728,26 @@ def _cmd_stress_inspect(args: argparse.Namespace) -> int:
             }
         else:
             a = sr.analysis(args.id)
-            doc = {**_stress_row(a), "summary": to_jsonable(a.summary), "provenance": sr.provenance(a.id), "trials": [_trial_row(t) for t in sr.trials(a.id)], "artifacts": [{"path": x.path, "id": x.id} for x in sr.artifacts(a.id)]}  # fmt: skip
+            doc = {
+                **_stress_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": sr.provenance(a.id),
+                "trials": [_trial_row(t) for t in sr.trials(a.id)],
+                "artifacts": [{"path": x.path, "id": x.id} for x in sr.artifacts(a.id)],
+            }
             if args.full:
-                doc["documents"] = {n: sr.document(a.id, n) for n in ("spec", "plan", "trials", "baseline", "results", "analyses", "summary")}  # fmt: skip
+                doc["documents"] = {
+                    n: sr.document(a.id, n)
+                    for n in (
+                        "spec",
+                        "plan",
+                        "trials",
+                        "baseline",
+                        "results",
+                        "analyses",
+                        "summary",
+                    )
+                }
     _emit(doc, f"{args.id}: {doc.get('status')}", args)
     return 0
 
@@ -3068,11 +3755,28 @@ def _cmd_stress_inspect(args: argparse.Namespace) -> int:
 def _stress_run(args: argparse.Namespace, *, sweep_only: bool) -> int:
     d = _stress_design(args.spec)
     if sweep_only and d.plan.design not in ("SWEEP", "REPEATED"):
-        raise ExperionyxError(f"`stress sweep` needs a plan with a sweep or several seeds (this one is {d.plan.design}); use `stress run`")  # fmt: skip
+        raise ExperionyxError(
+            f"`stress sweep` needs a plan with a sweep or several seeds (this one is {d.plan.design}); use `stress run`"
+        )
     with _open(args.workspace) as reg:
-        out = stress_engine.run_stress_experiment(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), d, source_root=Path.cwd(), investigation_id=args.investigation)  # fmt: skip
+        out = stress_engine.run_stress_experiment(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            d,
+            source_root=Path.cwd(),
+            investigation_id=args.investigation,
+        )
         a = reg.get(StressAnalysis, out.analysis_id) if out.analysis_id else None
-    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "baseline_run_id": out.baseline_run_id, "capabilities": to_jsonable(list(out.capabilities)), "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "baseline_run_id": out.baseline_run_id,
+        "capabilities": to_jsonable(list(out.capabilities)),
+        "summary": None if a is None else to_jsonable(a.summary),
+    }
     _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
     return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
 
@@ -3106,7 +3810,20 @@ def _cmd_stress_compare(args: argparse.Namespace) -> int:
             )
         except ExperionyxError:
             dataset = None
-        c = stress_engine.compute(reg, store, design, a.baseline_run_id, [{k: t[k] for k in ("unit", "status", "run_id", "experiment_id", "reason", "origin")} for t in trials["trials"]], analyses["links"], spec["capabilities"], dataset, a.investigation_id)  # fmt: skip
+        c = stress_engine.compute(
+            reg,
+            store,
+            design,
+            a.baseline_run_id,
+            [
+                {k: t[k] for k in ("unit", "status", "run_id", "experiment_id", "reason", "origin")}
+                for t in trials["trials"]
+            ],
+            analyses["links"],
+            spec["capabilities"],
+            dataset,
+            a.investigation_id,
+        )
         stored = {
             n: sr.document(a.id, n)
             for n in ("spec", "plan", "trials", "baseline", "results", "analyses", "summary")
@@ -3116,14 +3833,26 @@ def _cmd_stress_compare(args: argparse.Namespace) -> int:
     diffs: list[str] = []
     for name, doc in {**c.docs, "summary": c.summary}.items():
         compare_docs(name, stored[name], json.loads(json.dumps(to_jsonable(doc))), diffs)
-    out = {"analysis_id": a.id, "reproduced": not diffs, "differences": diffs[:50], "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint}, "not_stored": "nothing was stored; `stress replay` re-executes the trials"}  # fmt: skip
+    out = {
+        "analysis_id": a.id,
+        "reproduced": not diffs,
+        "differences": diffs[:50],
+        "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint},
+        "not_stored": "nothing was stored; `stress replay` re-executes the trials",
+    }
     _emit(out, f"{'reproduced' if not diffs else 'DIFFERS'}: {a.id}", args)
     return 0 if not diffs else 1
 
 
 def _cmd_stress_replay(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        out = stress_engine.replay_check(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), args.id, trials=not args.no_trials)  # fmt: skip
+        out = stress_engine.replay_check(
+            reg,
+            LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            _executor(reg, args.workspace),
+            args.id,
+            trials=not args.no_trials,
+        )
     _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
     return 0 if out["deterministic"] else 1
 
@@ -3148,31 +3877,75 @@ def _cbstore(args: argparse.Namespace) -> LocalArtifactStore:
 def _calibration_row(a: CalibrationAnalysis) -> dict[str, object]:
     s = a.summary
     method = s.get("method")
-    return {"id": a.id, "status": a.analysis_status, "spec_id": a.spec_id, "baseline_run_id": a.baseline_run_id, "dataset_fingerprint": a.dataset_fingerprint, "provenance_fingerprint": a.provenance_fingerprint, "prediction_representation": s.get("prediction_representation"), "binning": to_jsonable(s.get("binning")), "method": method.get("method") if isinstance(method, Mapping) else None, "baseline": to_jsonable(s.get("baseline"))}  # fmt: skip
+    return {
+        "id": a.id,
+        "status": a.analysis_status,
+        "spec_id": a.spec_id,
+        "baseline_run_id": a.baseline_run_id,
+        "dataset_fingerprint": a.dataset_fingerprint,
+        "provenance_fingerprint": a.provenance_fingerprint,
+        "prediction_representation": s.get("prediction_representation"),
+        "binning": to_jsonable(s.get("binning")),
+        "method": method.get("method") if isinstance(method, Mapping) else None,
+        "baseline": to_jsonable(s.get("baseline")),
+    }
 
 
 def _calibration_result_row(r: CalibrationResult) -> dict[str, object]:
-    return {"id": r.id, "context_key": r.context_key, "context_kind": r.context_kind, "status": r.status, "n_samples": r.n_samples, "reason": r.reason, "headline": to_jsonable(r.headline), "sample_digest": r.sample_digest}  # fmt: skip
+    return {
+        "id": r.id,
+        "context_key": r.context_key,
+        "context_kind": r.context_kind,
+        "status": r.status,
+        "n_samples": r.n_samples,
+        "reason": r.reason,
+        "headline": to_jsonable(r.headline),
+        "sample_digest": r.sample_digest,
+    }
 
 
 def _cmd_calibration_validate(args: argparse.Namespace) -> int:
     spec = _calibration_spec(args.spec)
-    out: dict[str, object] = {"valid": True, "spec_id": spec.spec_id, "baseline_run": spec.baseline_run, "prediction_source": spec.prediction_source, "objects": list(spec.objects), "binning": spec.binning.to_dict(), "method": spec.method, "slices": {s.name: s.slice_id for s in spec.slices}, "windows": [w.name for w in spec.windows.windows] if spec.windows else [], "stress_analyses": list(spec.stress_analyses)}  # fmt: skip
+    out: dict[str, object] = {
+        "valid": True,
+        "spec_id": spec.spec_id,
+        "baseline_run": spec.baseline_run,
+        "prediction_source": spec.prediction_source,
+        "objects": list(spec.objects),
+        "binning": spec.binning.to_dict(),
+        "method": spec.method,
+        "slices": {s.name: s.slice_id for s in spec.slices},
+        "windows": [w.name for w in spec.windows.windows] if spec.windows else [],
+        "stress_analyses": list(spec.stress_analyses),
+    }
     if args.preflight:
         with _open(args.workspace) as reg:
             base = calibration_engine.validate(reg, _cbstore(args), spec)
-            out["preflight"] = {"baseline_usable": len(base.obs), "baseline_rows": base.n_rows, "invalid_rows": len(base.invalid), "duplicate_ids": len(base.duplicates), "prediction_representation": base.representation, "classes": list(base.classes)}  # fmt: skip
+            out["preflight"] = {
+                "baseline_usable": len(base.obs),
+                "baseline_rows": base.n_rows,
+                "invalid_rows": len(base.invalid),
+                "duplicate_ids": len(base.duplicates),
+                "prediction_representation": base.representation,
+                "classes": list(base.classes),
+            }
     _emit(out, f"VALID: {spec.spec_id}", args)
     return 0
 
 
 def _cmd_calibration_list(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        cols = {k: v for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status)) if v}  # fmt: skip
+        cols = {
+            k: v
+            for k, v in (("baseline_run_id", args.baseline_run), ("analysis_status", args.status))
+            if v
+        }
         rows = [
             _calibration_row(a) for a in CalibrationRegistry(reg, _cbstore(args)).analyses(**cols)
         ]
-    _emit({"analyses": rows}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in rows), args)  # fmt: skip
+    _emit(
+        {"analyses": rows}, "\n".join(f"{r['id']} {r['status']} {r['spec_id']}" for r in rows), args
+    )
     return 0
 
 
@@ -3184,7 +3957,13 @@ def _cmd_calibration_inspect(args: argparse.Namespace) -> int:
             doc: dict[str, object] = {**_calibration_result_row(r), "analysis_id": r.analysis_id}
         else:
             a = cr.analysis(args.id)
-            doc = {**_calibration_row(a), "summary": to_jsonable(a.summary), "provenance": cr.provenance(a.id), "results": [_calibration_result_row(r) for r in cr.results(a.id)], "artifacts": [{"path": x.path, "id": x.id} for x in cr.artifacts(a.id)]}  # fmt: skip
+            doc = {
+                **_calibration_row(a),
+                "summary": to_jsonable(a.summary),
+                "provenance": cr.provenance(a.id),
+                "results": [_calibration_result_row(r) for r in cr.results(a.id)],
+                "artifacts": [{"path": x.path, "id": x.id} for x in cr.artifacts(a.id)],
+            }
             if args.document:
                 doc["document"] = cr.document(a.id, args.document)
             if args.full:
@@ -3196,10 +3975,21 @@ def _cmd_calibration_inspect(args: argparse.Namespace) -> int:
 def _cmd_calibration_evaluate(args: argparse.Namespace) -> int:
     spec = _calibration_spec(args.spec)
     with _open(args.workspace) as reg:
-        inv = args.investigation or reg.get(Experiment, reg.get(Run, spec.baseline_run).experiment_id).investigation_id  # fmt: skip
-        out = calibration_engine.run_calibration_request(reg, _cbstore(args), _executor(reg, args.workspace), inv, spec)  # fmt: skip
+        inv = (
+            args.investigation
+            or reg.get(Experiment, reg.get(Run, spec.baseline_run).experiment_id).investigation_id
+        )
+        out = calibration_engine.run_calibration_request(
+            reg, _cbstore(args), _executor(reg, args.workspace), inv, spec
+        )
         a = reg.get(CalibrationAnalysis, out.analysis_id) if out.analysis_id else None
-    doc: dict[str, object] = {"status": out.status.value, "run_id": out.run_id, "analysis_id": out.analysis_id, "analysis_status": None if a is None else a.analysis_status, "summary": None if a is None else to_jsonable(a.summary)}  # fmt: skip
+    doc: dict[str, object] = {
+        "status": out.status.value,
+        "run_id": out.run_id,
+        "analysis_id": out.analysis_id,
+        "analysis_status": None if a is None else a.analysis_status,
+        "summary": None if a is None else to_jsonable(a.summary),
+    }
     _emit(doc, f"{out.status.value}: {out.analysis_id} ({doc['analysis_status']})", args)
     return 0 if a is not None and a.analysis_status == "COMPLETE" else 3
 
@@ -3215,7 +4005,9 @@ def _cmd_calibration_compare(args: argparse.Namespace) -> int:
         try:
             from experionyx.slices.data import dataset_for_run
 
-            dataset = dataset_for_run(reg, default_registries(entry_points=True), Path(args.workspace), a.baseline_run_id)  # fmt: skip
+            dataset = dataset_for_run(
+                reg, default_registries(entry_points=True), Path(args.workspace), a.baseline_run_id
+            )
         except ExperionyxError:
             dataset = None
         c = calibration_engine.compute(reg, store, spec, dataset)
@@ -3225,14 +4017,22 @@ def _cmd_calibration_compare(args: argparse.Namespace) -> int:
     diffs: list[str] = []
     for name, doc in c.docs.items():
         compare_docs(name, stored[name], json.loads(json.dumps(to_jsonable(doc))), diffs)
-    out = {"analysis_id": a.id, "reproduced": not diffs, "differences": diffs[:50], "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint}, "not_stored": "nothing was stored; `calibration replay` re-executes the analysis run"}  # fmt: skip
+    out = {
+        "analysis_id": a.id,
+        "reproduced": not diffs,
+        "differences": diffs[:50],
+        "provenance_fingerprint": {"stored": a.provenance_fingerprint, "recomputed": c.fingerprint},
+        "not_stored": "nothing was stored; `calibration replay` re-executes the analysis run",
+    }
     _emit(out, f"{'reproduced' if not diffs else 'DIFFERS'}: {a.id}", args)
     return 0 if not diffs else 1
 
 
 def _cmd_calibration_replay(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
-        out = calibration_engine.replay_check(reg, _cbstore(args), _executor(reg, args.workspace), args.id)  # fmt: skip
+        out = calibration_engine.replay_check(
+            reg, _cbstore(args), _executor(reg, args.workspace), args.id
+        )
     _emit(out, f"{'reproduced' if out['deterministic'] else 'DIFFERS'}: {args.id}", args)
     return 0 if out["deterministic"] else 1
 
@@ -3870,17 +4670,29 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_benchmark_replay)
-    p = bm.add_parser("protocol", help="register a benchmark spec's model-independent protocol identity")  # fmt: skip
-    p.add_argument("spec", help="benchmark spec JSON file (the model field is ignored for identity)")  # fmt: skip
+    p = bm.add_parser(
+        "protocol", help="register a benchmark spec's model-independent protocol identity"
+    )
+    p.add_argument(
+        "spec", help="benchmark spec JSON file (the model field is ignored for identity)"
+    )
     bfmt(p)
     p.set_defaults(func=_cmd_benchmark_protocol)
-    p = bm.add_parser("submit", help="run a full benchmark (Phase 9) and submit its evidence to a registered protocol")  # fmt: skip
+    p = bm.add_parser(
+        "submit",
+        help="run a full benchmark (Phase 9) and submit its evidence to a registered protocol",
+    )
     p.add_argument("spec", help="benchmark spec JSON file, including the model")
-    p.add_argument("--protocol", required=True, help="protocol ID (bpr_...) or a protocol_hash prefix")  # fmt: skip
+    p.add_argument(
+        "--protocol", required=True, help="protocol ID (bpr_...) or a protocol_hash prefix"
+    )
     bfmt(p)
     p.set_defaults(func=_cmd_benchmark_submit)
 
-    lb = group("leaderboard", "reporting/organization over benchmark submissions; never a universal score or ranking")  # fmt: skip
+    lb = group(
+        "leaderboard",
+        "reporting/organization over benchmark submissions; never a universal score or ranking",
+    )
 
     def lfmt(q: argparse.ArgumentParser) -> None:
         q.add_argument("--format", choices=["json", "text"], default="json")
@@ -3888,23 +4700,37 @@ def _build_parser() -> argparse.ArgumentParser:
     p = lb.add_parser("list", help="list registered benchmark protocols")
     lfmt(p)
     p.set_defaults(func=_cmd_leaderboard_list)
-    p = lb.add_parser("inspect", help="a protocol (bpr_), submission (bsb_), snapshot (lbs_) or entry (lbe_)")  # fmt: skip
+    p = lb.add_parser(
+        "inspect", help="a protocol (bpr_), submission (bsb_), snapshot (lbs_) or entry (lbe_)"
+    )
     p.add_argument("id")
     lfmt(p)
     p.set_defaults(func=_cmd_leaderboard_inspect)
-    p = lb.add_parser("snapshot", help="build (or reuse) an immutable snapshot of every qualifying submission to a protocol")  # fmt: skip
+    p = lb.add_parser(
+        "snapshot",
+        help="build (or reuse) an immutable snapshot of every qualifying submission to a protocol",
+    )
     p.add_argument("protocol", help="protocol ID (bpr_...) or a protocol_hash prefix")
-    p.add_argument("--metric", action="append", help="restrict to this metric id (repeatable); default: every metric present")  # fmt: skip
+    p.add_argument(
+        "--metric",
+        action="append",
+        help="restrict to this metric id (repeatable); default: every metric present",
+    )
     p.add_argument("--require-complete-coverage", action="store_true")
     p.add_argument("--require-reproduction", action="store_true")
     lfmt(p)
     p.set_defaults(func=_cmd_leaderboard_snapshot)
-    p = lb.add_parser("compare", help="protocol-constrained raw comparison of two submissions (no winner)")  # fmt: skip
+    p = lb.add_parser(
+        "compare", help="protocol-constrained raw comparison of two submissions (no winner)"
+    )
     p.add_argument("a", help="submission ID (bsb_...)")
     p.add_argument("b", help="submission ID (bsb_...)")
     lfmt(p)
     p.set_defaults(func=_cmd_leaderboard_compare)
-    p = lb.add_parser("correct", help="multiple-comparison correction over an explicit family of registered stats analyses")  # fmt: skip
+    p = lb.add_parser(
+        "correct",
+        help="multiple-comparison correction over an explicit family of registered stats analyses",
+    )
     p.add_argument("analysis", nargs="+", help="sta_... COMPARE analysis IDs forming the family")
     p.add_argument("--method", choices=list(CORRECTION_METHODS), default="NONE")
     p.add_argument("--alpha", type=float, default=0.05)
@@ -3912,7 +4738,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p = lb.add_parser("verify", help="re-hash a submission's underlying benchmark run artifacts")
     p.add_argument("id", help="submission ID (bsb_...)")
     p.set_defaults(func=_cmd_leaderboard_verify)
-    p = lb.add_parser("replay", help="rebuild a snapshot from current evidence; exit 1 if the evidence changed")  # fmt: skip
+    p = lb.add_parser(
+        "replay", help="rebuild a snapshot from current evidence; exit 1 if the evidence changed"
+    )
     p.add_argument("id", help="snapshot ID (lbs_...)")
     lfmt(p)
     p.set_defaults(func=_cmd_leaderboard_replay)
@@ -4090,9 +4918,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "drift",
         "temporal and distribution shift between explicit windows (observed differences; no drift score, no causal claim)",
     )
-    p = dr.add_parser("validate", help="parse and normalize a drift spec; prints its identity and window plan (--preflight also checks the data)")  # fmt: skip
+    p = dr.add_parser(
+        "validate",
+        help="parse and normalize a drift spec; prints its identity and window plan (--preflight also checks the data)",
+    )
     p.add_argument("spec")
-    p.add_argument("--preflight", action="store_true", help="also load the baseline and dataset and refuse what the data cannot support")  # fmt: skip
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="also load the baseline and dataset and refuse what the data cannot support",
+    )
     slfmt(p)
     p.set_defaults(func=_cmd_drift_validate)
     p = dr.add_parser("list", help="list drift analyses (and optionally registered windows)")
@@ -4107,12 +4942,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full", action="store_true", help="include every stored document")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_inspect)
-    p = dr.add_parser("windows", help="resolve a spec's windows against the baseline data: members, digests, skipped windows (nothing is stored)")  # fmt: skip
+    p = dr.add_parser(
+        "windows",
+        help="resolve a spec's windows against the baseline data: members, digests, skipped windows (nothing is stored)",
+    )
     p.add_argument("spec")
     p.add_argument("--ids", action="store_true", help="list member sample IDs")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_windows)
-    p = dr.add_parser("evaluate", help="run a drift analysis as a new run (exit 3 if some evidence is insufficient, unavailable or skipped)")  # fmt: skip
+    p = dr.add_parser(
+        "evaluate",
+        help="run a drift analysis as a new run (exit 3 if some evidence is insufficient, unavailable or skipped)",
+    )
     p.add_argument("spec")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_evaluate)
@@ -4121,7 +4962,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full", action="store_true", help="include every per-feature result")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_compare)
-    p = dr.add_parser("replay", help="replay the analysis as a NEW run and compare every document; exit 1 on any difference")  # fmt: skip
+    p = dr.add_parser(
+        "replay",
+        help="replay the analysis as a NEW run and compare every document; exit 1 on any difference",
+    )
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_drift_replay)
@@ -4255,9 +5099,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "calibration",
         "calibration and uncertainty of stored predictions (confidence is not automatically uncertainty; no universal score)",
     )
-    p = cb.add_parser("validate", help="parse a calibration spec; prints its identity (--preflight refuses unsupported baselines before anything runs)")  # fmt: skip
+    p = cb.add_parser(
+        "validate",
+        help="parse a calibration spec; prints its identity (--preflight refuses unsupported baselines before anything runs)",
+    )
     p.add_argument("spec")
-    p.add_argument("--preflight", action="store_true", help="also check the baseline run's stored predictions and the referenced analyses")  # fmt: skip
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="also check the baseline run's stored predictions and the referenced analyses",
+    )
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_validate)
     p = cb.add_parser("list", help="list calibration analyses")
@@ -4265,22 +5116,38 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", choices=["COMPLETE", "PARTIAL"])
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_list)
-    p = cb.add_parser("inspect", help="a calibration analysis (cba_) with provenance, evidence and artifacts, or one context result (cbr_)")  # fmt: skip
+    p = cb.add_parser(
+        "inspect",
+        help="a calibration analysis (cba_) with provenance, evidence and artifacts, or one context result (cbr_)",
+    )
     p.add_argument("id")
-    p.add_argument("--document", choices=list(calibration_engine.DOCUMENTS), help="include one stored document (evidence)")  # fmt: skip
+    p.add_argument(
+        "--document",
+        choices=list(calibration_engine.DOCUMENTS),
+        help="include one stored document (evidence)",
+    )
     p.add_argument("--full", action="store_true", help="include every stored document")
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_inspect)
-    p = cb.add_parser("evaluate", help="run a calibration analysis as a new run; exit 3 if some evidence is insufficient, unavailable or invalid")  # fmt: skip
+    p = cb.add_parser(
+        "evaluate",
+        help="run a calibration analysis as a new run; exit 3 if some evidence is insufficient, unavailable or invalid",
+    )
     p.add_argument("spec")
     p.add_argument("--investigation", help="investigation ID (default: the baseline run's)")
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_evaluate)
-    p = cb.add_parser("compare", help="recompute an analysis from the stored predictions and compare it with the stored documents; nothing is stored")  # fmt: skip
+    p = cb.add_parser(
+        "compare",
+        help="recompute an analysis from the stored predictions and compare it with the stored documents; nothing is stored",
+    )
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_compare)
-    p = cb.add_parser("replay", help="replay the analysis as a NEW run and compare every document; exit 1 on any difference")  # fmt: skip
+    p = cb.add_parser(
+        "replay",
+        help="replay the analysis as a NEW run and compare every document; exit 1 on any difference",
+    )
     p.add_argument("id")
     slfmt(p)
     p.set_defaults(func=_cmd_calibration_replay)
@@ -4401,8 +5268,9 @@ def _build_parser() -> argparse.ArgumentParser:
     scfmt(p)
     p.set_defaults(func=_cmd_scheduler_graph)
     p = sc.add_parser(
-        "resume", help="continue a schedule from its persisted spec; already-SUCCEEDED units are not re-run"
-    )  # fmt: skip
+        "resume",
+        help="continue a schedule from its persisted spec; already-SUCCEEDED units are not re-run",
+    )
     p.add_argument("id")
     p.add_argument("--investigation")
     p.add_argument("--max-workers", type=int)
@@ -4420,9 +5288,10 @@ def _build_parser() -> argparse.ArgumentParser:
     scfmt(p)
     p.set_defaults(func=_cmd_scheduler_retry)
     p = sc.add_parser(
-        "replay", help="re-run a schedule as a new attempt and diff unit outcomes; exit 1 on a "
-        "non-environment-dependent difference"
-    )  # fmt: skip
+        "replay",
+        help="re-run a schedule as a new attempt and diff unit outcomes; exit 1 on a "
+        "non-environment-dependent difference",
+    )
     p.add_argument("id")
     p.add_argument("--max-workers", type=int)
     scfmt(p)
@@ -4436,12 +5305,23 @@ def _build_parser() -> argparse.ArgumentParser:
     def gquery_bounds(q: argparse.ArgumentParser) -> None:
         q.add_argument("--max-depth", type=int, default=12)
         q.add_argument("--max-visited", type=int, default=5000)
-        q.add_argument("--kind", action="append", help="restrict traversal to this NodeKind (repeatable)")  # fmt: skip
-        q.add_argument("--relation", action="append", help="restrict traversal to this RelationType (repeatable)")  # fmt: skip
+        q.add_argument(
+            "--kind", action="append", help="restrict traversal to this NodeKind (repeatable)"
+        )
+        q.add_argument(
+            "--relation",
+            action="append",
+            help="restrict traversal to this RelationType (repeatable)",
+        )
 
-    p = gr.add_parser("build", help="construct (or reuse) a graph snapshot over the current registry")  # fmt: skip
+    p = gr.add_parser(
+        "build", help="construct (or reuse) a graph snapshot over the current registry"
+    )
     p.add_argument("spec", help="graph spec JSON file")
-    p.add_argument("--investigation", help="investigation ID (default: the workspace's only one, or the spec's)")  # fmt: skip
+    p.add_argument(
+        "--investigation",
+        help="investigation ID (default: the workspace's only one, or the spec's)",
+    )
     gfmt(p)
     p.set_defaults(func=_cmd_graph_build)
     p = gr.add_parser("list", help="list constructed graph definitions")
@@ -4491,7 +5371,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.set_defaults(func=_cmd_graph_replay)
 
-    rp = group("reproduce", "reproducibility framework: what can and cannot be reproduced, and how")  # fmt: skip
+    rp = group("reproduce", "reproducibility framework: what can and cannot be reproduced, and how")
 
     def rp_fmt(q: argparse.ArgumentParser) -> None:
         q.add_argument("--format", choices=["json", "text"], default="json")
@@ -4500,14 +5380,24 @@ def _build_parser() -> argparse.ArgumentParser:
         q.add_argument("--relative-tolerance", type=float, default=DEFAULT_RELATIVE_TOLERANCE)
         q.add_argument("--absolute-tolerance", type=float, default=DEFAULT_ABSOLUTE_TOLERANCE)
 
-    p = rp.add_parser("validate", help="confirm a target exists and report its home investigation/run, without reproducing anything")  # fmt: skip
+    p = rp.add_parser(
+        "validate",
+        help="confirm a target exists and report its home investigation/run, without reproducing anything",
+    )
     p.add_argument("target_kind", choices=[k.value for k in TargetKind])
     p.add_argument("target_id")
     p.set_defaults(func=_cmd_reproduce_validate)
-    p = rp.add_parser("run", help="attempt to reproduce a target against the requested mode; exit 1 unless EQUAL/APPROXIMATELY_EQUAL")  # fmt: skip
+    p = rp.add_parser(
+        "run",
+        help="attempt to reproduce a target against the requested mode; exit 1 unless EQUAL/APPROXIMATELY_EQUAL",
+    )
     p.add_argument("target_kind", choices=[k.value for k in TargetKind])
     p.add_argument("target_id")
-    p.add_argument("--mode", choices=[m.value for m in ReproductionMode], default=ReproductionMode.DETERMINISTIC.value)  # fmt: skip
+    p.add_argument(
+        "--mode",
+        choices=[m.value for m in ReproductionMode],
+        default=ReproductionMode.DETERMINISTIC.value,
+    )
     p.add_argument("--investigation", help="required for a SCHEDULE target")
     rtol(p)
     rp_fmt(p)
@@ -4516,7 +5406,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     rp_fmt(p)
     p.set_defaults(func=_cmd_reproduce_inspect)
-    p = rp.add_parser("compare", help="ad hoc tolerance-aware comparison of two stored JSON artifacts, possibly from different runs")  # fmt: skip
+    p = rp.add_parser(
+        "compare",
+        help="ad hoc tolerance-aware comparison of two stored JSON artifacts, possibly from different runs",
+    )
     p.add_argument("run_a")
     p.add_argument("path_a", help="artifact path within run_a, e.g. benchmark/results.json")
     p.add_argument("run_b")
@@ -4526,7 +5419,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p = rp.add_parser("verify", help="re-hash a run's artifacts against their recorded digests")
     p.add_argument("run_id")
     p.set_defaults(func=_cmd_reproduce_verify)
-    p = rp.add_parser("replay", help="re-attempt a prior reproduction attempt's exact spec as a NEW attempt")  # fmt: skip
+    p = rp.add_parser(
+        "replay", help="re-attempt a prior reproduction attempt's exact spec as a NEW attempt"
+    )
     p.add_argument("id")
     rp_fmt(p)
     p.set_defaults(func=_cmd_reproduce_replay)
@@ -4535,6 +5430,113 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("b")
     rp_fmt(p)
     p.set_defaults(func=_cmd_reproduce_diff)
+
+    rpt = group(
+        "report", "research reporting: deterministic reports assembled from persisted evidence"
+    )
+
+    def rpt_fmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    p = rpt.add_parser(
+        "generate", help="generate a report from an investigation's persisted evidence"
+    )
+    p.add_argument("report_type", choices=[t.value for t in ReportType])
+    p.add_argument("--investigation", required=True)
+    p.add_argument(
+        "--template-id",
+        help="an existing report template ID; defaults to the built-in template for this report type",
+    )
+    p.add_argument(
+        "--run",
+        action="append",
+        help="narrow evidence to this run (repeatable); default is every run in scope",
+    )
+    p.add_argument(
+        "--statistical-analysis",
+        action="append",
+        help="include this statistical analysis ID (repeatable)",
+    )
+    rpt_fmt(p)
+    p.set_defaults(func=_cmd_report_generate)
+    p = rpt.add_parser("list", help="list generated reports")
+    p.add_argument("--investigation")
+    p.set_defaults(func=_cmd_report_list)
+    p = rpt.add_parser("show", help="show a report (rpt_...)")
+    p.add_argument("id")
+    rpt_fmt(p)
+    p.set_defaults(func=_cmd_report_show)
+    p = rpt.add_parser("sections", help="a report's sections")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_report_sections)
+    p = rpt.add_parser("claims", help="a report's claim/evidence matrix (its findings)")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_report_claims)
+    p = rpt.add_parser(
+        "validate",
+        help="check every claim has evidence and every reference resolves; exit 1 on any ERROR",
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_report_validate)
+    p = rpt.add_parser("export", help="render a report to Markdown or HTML")
+    p.add_argument("id")
+    p.add_argument("--export-format", choices=["markdown", "html"], default="markdown")
+    p.add_argument("--output", help="write to this path instead of stdout")
+    p.set_defaults(func=_cmd_report_export)
+
+    dsr = group(
+        "dossier",
+        "evidence dossiers: structured, persisted research packages built on top of reports",
+    )
+
+    def dsr_fmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    p = dsr.add_parser(
+        "build", help="build a dossier from an investigation's persisted evidence and reports"
+    )
+    p.add_argument("--investigation", required=True)
+    p.add_argument("--question", required=True, help="the research question this dossier addresses")
+    p.add_argument(
+        "--source-kind", choices=[k.value for k in DossierSourceKind], default="INVESTIGATION"
+    )
+    p.add_argument("--source-id", help="defaults to --investigation")
+    p.add_argument(
+        "--evidence",
+        action="append",
+        help="explicit 'source_kind:source_id' evidence to include (repeatable)",
+    )
+    dsr_fmt(p)
+    p.set_defaults(func=_cmd_dossier_build)
+    p = dsr.add_parser("list", help="list built dossiers")
+    p.add_argument("--investigation")
+    p.set_defaults(func=_cmd_dossier_list)
+    p = dsr.add_parser("show", help="show a dossier (dsr_...)")
+    p.add_argument("id")
+    dsr_fmt(p)
+    p.set_defaults(func=_cmd_dossier_show)
+    p = dsr.add_parser("items", help="a dossier's evidence items and their lineage")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_dossier_items)
+    p = dsr.add_parser("findings", help="a dossier's sufficiency-analysis findings")
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_dossier_findings)
+    p = dsr.add_parser(
+        "snapshot", help="freeze a dossier's current evidence into an immutable snapshot"
+    )
+    p.add_argument("id")
+    dsr_fmt(p)
+    p.set_defaults(func=_cmd_dossier_snapshot)
+    p = dsr.add_parser(
+        "validate",
+        help="list unresolved sufficiency findings; exit 1 if any evidence is unavailable or stale",
+    )
+    p.add_argument("id")
+    p.set_defaults(func=_cmd_dossier_validate)
+    p = dsr.add_parser("export", help="render a dossier to Markdown")
+    p.add_argument("id")
+    p.add_argument("--output", help="write to this path instead of stdout")
+    p.set_defaults(func=_cmd_dossier_export)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

@@ -78,12 +78,18 @@ def make_database(path: Path, version: int) -> dict[str, Entity]:
     made: dict[str, Entity] = {"exp": exp, "run": r, "obs": obs, "art": art, "inv": inv}
     if version >= 2:
         prov = Provenance(
-            run_id=r.id, experiment_id=exp.id, environment_id=env.id, dependency_digest=DIGEST,
-            configuration_id=cfg.id, seed=r.seed,
+            run_id=r.id,
+            experiment_id=exp.id,
+            environment_id=env.id,
+            dependency_digest=DIGEST,
+            configuration_id=cfg.id,
+            seed=r.seed,
             source=SourceRevision(SourceState.REPRODUCIBLE_SOURCE, "a" * 40, "main"),
-            executor_version="0.0.1", execution=ExecutionParameters("m:f"), started_at=T0,
+            executor_version="0.0.1",
+            execution=ExecutionParameters("m:f"),
+            started_at=T0,
             runtime={"pid": 1},
-        )  # fmt: skip
+        )
         payload = prov.to_dict()
         if version == 2:
             del payload["inputs"]  # Phase 2 provenance had no `inputs`
@@ -265,7 +271,7 @@ def test_every_prior_version_migrates_to_failure_tables_and_accepts_failure_reco
         reg.add(s)  # the new tables work immediately after the stepwise migration
         assert reg.get(FailureSignal, s.id) == s
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "failure_signals",
@@ -303,7 +309,7 @@ def test_every_prior_version_migrates_to_benchmark_tables_and_keeps_its_data(
     with SqliteRegistry(path) as reg:
         assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"benchmarks", "benchmark_results", "benchmark_units"} <= tables
         assert (
@@ -344,7 +350,7 @@ def test_every_prior_version_migrates_to_statistics_table_and_accepts_analyses(
         assert new
         assert reg.get(StatisticalAnalysis, a.id) == a  # the new table works at once
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "statistical_analyses" in tables
         assert raw.execute("SELECT COUNT(*) FROM statistical_analyses").fetchone()[0] == 1
@@ -385,7 +391,7 @@ def test_every_prior_version_migrates_to_slice_tables_and_accepts_slices(
         assert created2
         assert again.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"slices", "slice_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM slices").fetchone()[0] == 2
@@ -435,7 +441,7 @@ def test_every_prior_version_migrates_to_drift_tables_and_accepts_windows(
         )
         assert created3 and other.id != rec.id
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"temporal_windows", "drift_analyses"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM temporal_windows").fetchone()[0] == 2
@@ -493,7 +499,7 @@ def test_every_prior_version_migrates_to_quality_tables_and_accepts_records(
         assert QualityRegistry(reg).analyses() == []  # the new table exists and is empty
         assert reg.find(QualityCheck) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"quality_analyses", "quality_checks"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM quality_analyses").fetchone()[0] == 0
@@ -529,7 +535,7 @@ def test_every_prior_version_migrates_to_stress_tables_and_keeps_its_data(
         assert StressRegistry(reg).analyses() == []  # the new tables exist and are empty
         assert reg.find(StressTrial) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"stress_analyses", "stress_trials"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM stress_analyses").fetchone()[0] == 0
@@ -566,7 +572,7 @@ def test_every_prior_version_migrates_to_calibration_tables_and_keeps_its_data(
         assert CalibrationRegistry(reg).analyses() == []  # the new tables exist and are empty
         assert reg.find(CalibrationResult) == []
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"calibration_analyses", "calibration_results"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM calibration_analyses").fetchone()[0] == 0
@@ -607,16 +613,24 @@ def test_every_prior_version_migrates_to_resource_tables_and_keeps_its_data(
         assert reg.find(ResourceTrial) == []
         t0 = datetime(2026, 9, 21, tzinfo=UTC)
         a = ResourceAnalysis(
-            made["inv"].id, made["run"].id, "rsp_" + "1" * 32, {"batch_size": 8},
-            "mdl_" + "2" * 32, "dst_" + "3" * 32, DIGEST, "COMPLETE", {"trials": {"used": 5}}, t0,
-        )  # fmt: skip
+            made["inv"].id,
+            made["run"].id,
+            "rsp_" + "1" * 32,
+            {"batch_size": 8},
+            "mdl_" + "2" * 32,
+            "dst_" + "3" * 32,
+            DIGEST,
+            "COMPLETE",
+            {"trials": {"used": 5}},
+            t0,
+        )
         reg.add(a)  # the new tables work immediately after the stepwise migration
         tr = ResourceTrial(a.id, "MEASURED", 0, "COMPLETED", 10, 10, 0, 0.5, None, t0)
         reg.add(tr)
         assert reg.get(ResourceAnalysis, a.id) == a and reg.get(ResourceTrial, tr.id) == tr
         assert a.id == ResourceAnalysis.from_dict(a.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"resource_analyses", "resource_trials"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM resource_analyses").fetchone()[0] == 1
@@ -687,9 +701,17 @@ def test_every_prior_version_migrates_to_schedule_tables_and_keeps_its_data(
         reg.add(run)
         reg.update_status(run.with_status(ScheduleRunState.RUNNING))
         unit = ScheduleUnit(
-            sched.id, "baseline", UnitKind.BASELINE_EVALUATION, {"experiment_id": made["exp"].id},
-            (), {"kind": "NONE", "max_attempts": 1, "retryable": []}, None, None, 0, t0,
-        )  # fmt: skip
+            sched.id,
+            "baseline",
+            UnitKind.BASELINE_EVALUATION,
+            {"experiment_id": made["exp"].id},
+            (),
+            {"kind": "NONE", "max_attempts": 1, "retryable": []},
+            None,
+            None,
+            0,
+            t0,
+        )
         reg.add(unit)
         unit = unit.with_status(UnitState.READY)
         reg.update_status(unit)
@@ -700,16 +722,25 @@ def test_every_prior_version_migrates_to_schedule_tables_and_keeps_its_data(
         )
         reg.add(transition)
         attempt = ExecutionAttempt(
-            unit.id, run.id, 0, t0, t0, UnitState.SUCCEEDED, None, None, None, made["run"].id,
+            unit.id,
+            run.id,
+            0,
+            t0,
+            t0,
+            UnitState.SUCCEEDED,
+            None,
+            None,
+            None,
             made["run"].id,
-        )  # fmt: skip
+            made["run"].id,
+        )
         reg.add(attempt)
         assert reg.get(Schedule, sched.id) == sched
         assert reg.get(ScheduleUnit, unit.id).status is UnitState.RUNNING
         assert reg.get(ExecutionAttempt, attempt.id) == attempt
         assert sched.id == Schedule.from_dict(sched.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "schedules",
@@ -757,9 +788,18 @@ def test_an_execution_attempt_needs_its_unit_and_schedule_run_to_exist(tmp_path:
     make_database(path, 15)
     when = datetime(2026, 9, 23, tzinfo=UTC)
     orphan = ExecutionAttempt(
-        "sun_" + "9" * 32, "scr_" + "9" * 32, 0, when, when, UnitState.SUCCEEDED, None, None,
-        None, None, None,
-    )  # fmt: skip
+        "sun_" + "9" * 32,
+        "scr_" + "9" * 32,
+        0,
+        when,
+        when,
+        UnitState.SUCCEEDED,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
         reg.add(orphan)
 
@@ -798,7 +838,7 @@ def test_every_prior_version_migrates_to_graph_tables_and_keeps_its_data(
         assert reg.get(GraphEdge, edge.id) == edge
         assert gr.id == EvidenceGraph.from_dict(gr.to_dict()).id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"evidence_graphs", "graph_snapshots", "graph_nodes", "graph_edges"} <= tables
         assert raw.execute("SELECT COUNT(*) FROM evidence_graphs").fetchone()[0] == 1
@@ -857,16 +897,32 @@ def test_every_prior_version_migrates_to_reproduction_tables_and_keeps_its_data(
         assert reg.find(ReproductionAttempt) == []  # the new table exists and is empty
         t0 = datetime(2026, 9, 24, tzinfo=UTC)
         attempt = ReproductionAttempt(
-            TargetKind.RUN, made["run"].id, "rsc_" + "1" * 32, {"target_id": made["run"].id},
-            0, made["inv"].id, made["run"].id, None, None, None, ComparisonOutcome.EQUAL, False,
-            (), (), {}, {}, None, "1.0.0", t0,
-        )  # fmt: skip
+            TargetKind.RUN,
+            made["run"].id,
+            "rsc_" + "1" * 32,
+            {"target_id": made["run"].id},
+            0,
+            made["inv"].id,
+            made["run"].id,
+            None,
+            None,
+            None,
+            ComparisonOutcome.EQUAL,
+            False,
+            (),
+            (),
+            {},
+            {},
+            None,
+            "1.0.0",
+            t0,
+        )
         reg.add(attempt)  # the new table works immediately after the stepwise migration
         assert reg.get(ReproductionAttempt, attempt.id) == attempt
         again = ReproductionAttempt.from_dict(attempt.to_dict())
         assert attempt.id == again.id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "reproduction_attempts" in tables
         assert raw.execute("SELECT COUNT(*) FROM reproduction_attempts").fetchone()[0] == 1
@@ -901,10 +957,26 @@ def test_a_reproduction_attempt_needs_its_investigation_to_exist(tmp_path: Path)
     make_database(path, 17)
     when = datetime(2026, 9, 24, tzinfo=UTC)
     orphan = ReproductionAttempt(
-        TargetKind.RUN, "run_" + "9" * 32, "rsc_" + "9" * 32, {}, 0, "inv_" + "9" * 32,
-        "run_" + "9" * 32, None, None, None, ComparisonOutcome.EQUAL, False, (), (), {}, {},
-        None, "1.0.0", when,
-    )  # fmt: skip
+        TargetKind.RUN,
+        "run_" + "9" * 32,
+        "rsc_" + "9" * 32,
+        {},
+        0,
+        "inv_" + "9" * 32,
+        "run_" + "9" * 32,
+        None,
+        None,
+        None,
+        ComparisonOutcome.EQUAL,
+        False,
+        (),
+        (),
+        {},
+        {},
+        None,
+        "1.0.0",
+        when,
+    )
     with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
         reg.add(orphan)
 
@@ -1009,7 +1081,7 @@ def test_every_prior_version_migrates_to_leaderboard_tables_and_keeps_its_data(
         again = BenchmarkProtocol.from_dict(protocol.to_dict())
         assert protocol.id == again.id  # deterministic identity
     with sqlite3.connect(path) as raw:
-        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 19
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         expected_tables = {
             "benchmark_protocols",
@@ -1056,6 +1128,75 @@ def test_a_benchmark_submission_needs_its_protocol_to_exist(tmp_path: Path) -> N
         "bmk_" + "9" * 32,
         "brs_" + "9" * 32,
         when,
+    )
+    with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
+        reg.add(orphan)
+
+
+@pytest.mark.parametrize(
+    "version", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+)
+def test_every_prior_version_migrates_to_report_tables_and_keeps_its_data(
+    tmp_path: Path, version: int
+) -> None:
+    from experionyx.reporting.entities import Report, ReportFinding, ReportTemplate
+    from experionyx.reporting.generator import builtin_template, ensure_template, generate_report
+    from experionyx.reporting.spec import ReportSpec
+    from experionyx.reporting.taxonomy import ReportType
+
+    path = tmp_path / f"v{version}.sqlite"
+    made = make_database(path, version)
+    with SqliteRegistry(path) as reg:
+        assert reg.get(Experiment, made["exp"].id) == made["exp"]  # existing data untouched
+        assert reg.find(Report) == []  # the new tables exist and are empty
+
+        template_id = ensure_template(reg, builtin_template(ReportType.INVESTIGATION_DOSSIER))
+        spec = ReportSpec(ReportType.INVESTIGATION_DOSSIER, made["inv"].id, template_id)
+        result = generate_report(reg, spec)  # the new tables work immediately after migration
+
+        report = reg.get(Report, result.report_id)
+        assert report.investigation_id == made["inv"].id
+        assert reg.find(ReportFinding, report_id=report.id) != []
+        again = ReportSpec.from_dict(spec.to_dict())
+        assert spec.spec_id == again.spec_id  # deterministic identity
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == DB_SCHEMA_VERSION == 21
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"report_templates", "reports", "report_findings"} <= tables
+        assert raw.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 1
+        assert raw.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] >= 1
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            raw.execute("UPDATE reports SET payload = '{}'")
+        with pytest.raises(sqlite3.DatabaseError, match="cannot be deleted"):
+            raw.execute("DELETE FROM report_findings")
+    assert (tmp_path / f"v{version}.sqlite.v{version}.bak").is_file()
+    assert ReportTemplate.PREFIX == "rtp"
+    assert Report.PREFIX == "rpt" and ReportFinding.PREFIX == "rfd"
+
+
+def test_report_migration_is_atomic_when_the_step_fails(tmp_path: Path) -> None:
+    path = tmp_path / "v19.sqlite"
+    make_database(path, 19)
+    with sqlite3.connect(path) as raw:
+        raw.execute("CREATE TABLE report_templates (x INTEGER)")  # collides with the DDL
+    with pytest.raises(sqlite3.DatabaseError):
+        SqliteRegistry(path)
+    with sqlite3.connect(path) as raw:
+        assert raw.execute("PRAGMA user_version").fetchone()[0] == 19  # still the old version
+
+
+def test_a_report_finding_needs_its_report_to_exist(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from experionyx.domain import ClaimStatus
+    from experionyx.errors import MissingReferenceError
+    from experionyx.reporting.entities import ReportFinding
+
+    path = tmp_path / "v19.sqlite"
+    make_database(path, 19)
+    when = datetime(2026, 9, 24, tzinfo=UTC)
+    orphan = ReportFinding(
+        "rpt_" + "9" * 32, "an unsupported claim", ClaimStatus.INCONCLUSIVE, (), None, (), when
     )
     with SqliteRegistry(path) as reg, pytest.raises(MissingReferenceError):
         reg.add(orphan)

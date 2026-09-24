@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 20 (advanced reproducibility + benchmark/leaderboard system).** The typed domain model, a local SQLite registry,
+> **Status: Phase 22 (research reporting + evidence dossiers).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -147,6 +147,21 @@ See [docs/architecture.md](docs/architecture.md) and
   leaderboard snapshots, protocol-constrained metric-specific comparisons, explicit multiple-comparison
   correction (reusing Phase 10), reproducibility-state and resource-context reporting kept separate from
   predictive metrics. No universal score, no "best model" verdict, no combined ranking.
+- Research reporting ([docs/reporting.md](docs/reporting.md)): versioned, deterministic reports
+  assembled entirely from evidence every prior engine already persisted — it never re-executes an
+  experiment or recomputes a statistic. Claims cannot exist without a resolvable evidence
+  reference; a section without supporting evidence is recorded as an explicit gap rather than
+  omitted or invented; statistical results are rendered verbatim (effect size, interval, sample
+  size, method, p-value, correction) never reinterpreted; templates are versioned so an old
+  report stays reproducible after a template changes; Markdown is the canonical export, with a
+  thin derived HTML export.
+- Evidence dossiers ([docs/dossier.md](docs/dossier.md)): structured, persisted research packages
+  layered on reporting and the evidence graph — deterministic construction from an investigation,
+  report, run, failure mode, benchmark result, reliability profile, or graph snapshot; an explicit
+  evidence-sufficiency analysis (missing/unavailable/conflicting evidence, provenance and
+  reproducibility gaps — never hidden); conflicting statistical evidence is preserved and
+  cross-referenced, never auto-resolved; immutable, content-addressed snapshots that a later
+  experiment cannot silently alter.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

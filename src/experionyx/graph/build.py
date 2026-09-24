@@ -38,6 +38,12 @@ from experionyx.domain import (
     Observation,
     Run,
 )
+from experionyx.dossier.entities import (
+    DossierFinding,
+    DossierItem,
+    DossierSnapshot,
+    EvidenceDossier,
+)
 from experionyx.drift.entities import DriftAnalysis, DriftWindow
 from experionyx.failures.entities import (
     FailureCluster,
@@ -59,6 +65,7 @@ from experionyx.interactions.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import Registry
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.reporting.entities import Report, ReportFinding, ReportTemplate
 from experionyx.reproducibility.entities import ReproductionAttempt
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.scheduler.entities import (
@@ -73,23 +80,62 @@ from experionyx.stats.entities import StatisticalAnalysis
 from experionyx.stress.entities import StressAnalysis, StressTrial
 
 ENTITY_TYPES: tuple[type[Entity], ...] = (
-    Investigation, ConfigurationRef, EnvironmentSnapshot, Experiment, Run, Observation, Artifact,
-    Claim, Evidence, Provenance, RunOutcome, RegisteredModel, RegisteredDataset,
-    FaultExperiment, FaultTrial, FaultAnalysis,
-    FailureSignal, FailureCluster, FailureMode, FailureEvidence, FailureRelationship,
-    InteractionAnalysis, InteractionEffect, InteractionEvidence,
-    ReliabilityProfile, ReliabilityReference,
-    Benchmark, BenchmarkResult, BenchmarkUnit,
+    Investigation,
+    ConfigurationRef,
+    EnvironmentSnapshot,
+    Experiment,
+    Run,
+    Observation,
+    Artifact,
+    Claim,
+    Evidence,
+    Provenance,
+    RunOutcome,
+    RegisteredModel,
+    RegisteredDataset,
+    FaultExperiment,
+    FaultTrial,
+    FaultAnalysis,
+    FailureSignal,
+    FailureCluster,
+    FailureMode,
+    FailureEvidence,
+    FailureRelationship,
+    InteractionAnalysis,
+    InteractionEffect,
+    InteractionEvidence,
+    ReliabilityProfile,
+    ReliabilityReference,
+    Benchmark,
+    BenchmarkResult,
+    BenchmarkUnit,
     StatisticalAnalysis,
-    Slice, SliceAnalysis,
-    DriftWindow, DriftAnalysis,
-    QualityAnalysis, QualityCheck,
-    StressAnalysis, StressTrial,
-    CalibrationAnalysis, CalibrationResult,
-    ResourceAnalysis, ResourceTrial,
-    Schedule, ScheduleRun, ScheduleUnit, ExecutionAttempt, UnitStateTransition,
+    Slice,
+    SliceAnalysis,
+    DriftWindow,
+    DriftAnalysis,
+    QualityAnalysis,
+    QualityCheck,
+    StressAnalysis,
+    StressTrial,
+    CalibrationAnalysis,
+    CalibrationResult,
+    ResourceAnalysis,
+    ResourceTrial,
+    Schedule,
+    ScheduleRun,
+    ScheduleUnit,
+    ExecutionAttempt,
+    UnitStateTransition,
     ReproductionAttempt,
-)  # fmt: skip
+    ReportTemplate,
+    Report,
+    ReportFinding,
+    EvidenceDossier,
+    DossierItem,
+    DossierFinding,
+    DossierSnapshot,
+)
 
 _ID_RE = re.compile(r"[a-z]{3}_[0-9a-f]{32}")
 
@@ -127,6 +173,13 @@ FIELD_RELATION: dict[str, RelationType] = {
     "dataset_record_id": RelationType.USES_DATASET,
     "target_id": RelationType.REPRODUCED_BY,
     "replay_run_id": RelationType.COMPARED_WITH,
+    "template_id": RelationType.DEPENDS_ON,
+    "report_id": RelationType.MEMBER_OF,
+    "source_id": RelationType.EVIDENCE_FOR,
+    "statistical_analysis_id": RelationType.ANALYZED_BY,
+    "dossier_id": RelationType.MEMBER_OF,
+    "report_finding_id": RelationType.REFERENCES,
+    "conflicting_with": RelationType.REFERENCES,
 }
 
 _DESCRIPTOR_ENDPOINTS = frozenset(
@@ -208,7 +261,9 @@ class _Builder:
         self.unresolved = 0
         self.truncated = False
 
-    def _add_node(self, kind: NodeKind, ref_id: str, resolved: bool, detail: dict[str, object]) -> tuple[NodeKind, str]:  # fmt: skip
+    def _add_node(
+        self, kind: NodeKind, ref_id: str, resolved: bool, detail: dict[str, object]
+    ) -> tuple[NodeKind, str]:
         key = (kind, ref_id)
         if key not in self.nodes:
             if len(self.nodes) >= self.spec.max_nodes:
@@ -219,7 +274,13 @@ class _Builder:
                 self.unresolved += 1
         return key
 
-    def _add_edge(self, frm: tuple[NodeKind, str], to: tuple[NodeKind, str], relation: RelationType, detail: dict[str, object]) -> None:  # fmt: skip
+    def _add_edge(
+        self,
+        frm: tuple[NodeKind, str],
+        to: tuple[NodeKind, str],
+        relation: RelationType,
+        detail: dict[str, object],
+    ) -> None:
         key = (frm, to, relation, content_hash(detail))
         if key not in self.edges and len(self.edges) >= self.spec.max_edges:
             self.truncated = True
@@ -232,7 +293,9 @@ class _Builder:
             return None
         return self._add_node(kind, entity.id, True, {})
 
-    def _generic_edges(self, registry: Registry, entity: Entity, self_key: tuple[NodeKind, str]) -> None:  # fmt: skip
+    def _generic_edges(
+        self, registry: Registry, entity: Entity, self_key: tuple[NodeKind, str]
+    ) -> None:
         overrides = _overrides(entity)
         found: list[tuple[str, str]] = []
         if is_dataclass(entity) and not isinstance(entity, type):
@@ -248,7 +311,9 @@ class _Builder:
             if not self.spec.includes(kind):
                 continue
             to_key = self._add_node(kind, value, resolved, {})
-            relation = overrides.get(field_name) or FIELD_RELATION.get(field_name, RelationType.REFERENCES)  # fmt: skip
+            relation = overrides.get(field_name) or FIELD_RELATION.get(
+                field_name, RelationType.REFERENCES
+            )
             self._add_edge(self_key, to_key, relation, {"field": field_name})
 
     def _split_edge(self, entity: Entity, self_key: tuple[NodeKind, str]) -> None:
@@ -258,10 +323,17 @@ class _Builder:
             return
         if not self.spec.includes(NodeKind.SPLIT):
             return
-        node = self._add_node(NodeKind.SPLIT, _split_node(fp, split), True, {"dataset_fingerprint": fp, "split": split})  # fmt: skip
+        node = self._add_node(
+            NodeKind.SPLIT,
+            _split_node(fp, split),
+            True,
+            {"dataset_fingerprint": fp, "split": split},
+        )
         self._add_edge(self_key, node, RelationType.USES_SPLIT, {})
 
-    def _failure_relationship_edges(self, entity: FailureRelationship, self_key: tuple[NodeKind, str]) -> None:  # fmt: skip
+    def _failure_relationship_edges(
+        self, entity: FailureRelationship, self_key: tuple[NodeKind, str]
+    ) -> None:
         if not self.spec.includes(NodeKind.DESCRIPTOR):
             return
         for endpoint_kind, raw_id, field_name in (
@@ -270,8 +342,18 @@ class _Builder:
         ):
             if endpoint_kind not in _DESCRIPTOR_ENDPOINTS:
                 continue
-            node = self._add_node(NodeKind.DESCRIPTOR, _descriptor_node(endpoint_kind, raw_id), True, {"kind": endpoint_kind.value, "value": raw_id})  # fmt: skip
-            self._add_edge(self_key, node, RelationType.REFERENCES, {"predicate": entity.predicate.value, "field": field_name})  # fmt: skip
+            node = self._add_node(
+                NodeKind.DESCRIPTOR,
+                _descriptor_node(endpoint_kind, raw_id),
+                True,
+                {"kind": endpoint_kind.value, "value": raw_id},
+            )
+            self._add_edge(
+                self_key,
+                node,
+                RelationType.REFERENCES,
+                {"predicate": entity.predicate.value, "field": field_name},
+            )
 
     def add(self, registry: Registry, entity: Entity) -> None:
         self_key = self._self_node(entity)
@@ -351,7 +433,7 @@ def _excluded(registry: Registry) -> _Excluded:
 
 
 def _is_bookkeeping(entity: Entity, excluded: _Excluded) -> bool:
-    from experionyx.domain import (  # fmt: skip
+    from experionyx.domain import (
         Claim,
         ConfigurationRef,
         EnvironmentSnapshot,

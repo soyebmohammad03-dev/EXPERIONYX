@@ -100,6 +100,21 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx reproduce verify <run-id>` | re-hash a run's artifacts against their recorded digests |
 | `experionyx reproduce replay <rpa_…>` | re-attempt a prior attempt's exact spec as a NEW attempt |
 | `experionyx reproduce diff <rpa_…> <rpa_…>` | structural diff between two persisted reproduction attempts; see [reproducibility.md](reproducibility.md) |
+| `experionyx report generate <TYPE> --investigation inv_… [--template-id --run --statistical-analysis --format]` | generate a report from an investigation's persisted evidence (never re-executes anything) |
+| `experionyx report list [--investigation]` | list generated reports |
+| `experionyx report show <rpt_…>` | a report and its sections |
+| `experionyx report sections <rpt_…>` | a report's sections |
+| `experionyx report claims <rpt_…>` | a report's claim/evidence matrix (its findings) |
+| `experionyx report validate <rpt_…>` | check every claim has evidence and every reference resolves; exit 1 on any error |
+| `experionyx report export <rpt_…> [--export-format markdown\|html --output PATH]` | render a report to Markdown (canonical) or HTML; see [reporting.md](reporting.md) |
+| `experionyx dossier build --investigation inv_… --question Q [--source-kind --source-id --evidence k:v… --format]` | build a structured evidence dossier from an investigation's persisted evidence and reports |
+| `experionyx dossier list [--investigation]` | list built dossiers |
+| `experionyx dossier show <dsr_…>` | a dossier and its scope |
+| `experionyx dossier items <dsr_…>` | a dossier's evidence items and their lineage |
+| `experionyx dossier findings <dsr_…>` | a dossier's sufficiency-analysis findings (gaps, conflicts, provenance/reproducibility gaps) |
+| `experionyx dossier snapshot <dsr_…>` | freeze a dossier's current evidence into an immutable snapshot |
+| `experionyx dossier validate <dsr_…>` | list unresolved sufficiency findings; exit 1 if any evidence is unavailable or stale |
+| `experionyx dossier export <dsr_…> [--output PATH]` | render a dossier to Markdown; see [dossier.md](dossier.md) |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through

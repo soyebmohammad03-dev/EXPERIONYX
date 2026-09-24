@@ -104,6 +104,16 @@ A `BenchmarkSubmission` carries no provenance of its own beyond referencing a re
 documents (protocol hash, every unit's run provenance fingerprint, the collect run's own
 Provenance record). See [leaderboard.md](leaderboard.md).
 
+## Reports and dossiers (Phase 21-22)
+
+Neither a `Report` nor an `EvidenceDossier` carries its own provenance record: both are
+assembled entirely from evidence that already has provenance where provenance applies (a `Run`'s
+own `Provenance`, a `ReproductionAttempt`'s environment diff). What they add is lineage, not a new
+provenance mechanism: a `DossierItem.captured_content_hash` is the referenced entity's own
+`content_hash()` at inclusion time, and `DossierItem.provenance_fingerprint` is that run's real
+`Provenance.fingerprint`, copied by reference — never recomputed or reinterpreted. See
+[reporting.md](reporting.md), [dossier.md](dossier.md).
+
 ## Calibration analyses (Phase 15)
 
 Every calibration analysis is a Run with its own Provenance record (source revision, environment,

@@ -32,6 +32,12 @@ from experionyx.domain import (
     RunStatus,
     evidence_target_type,
 )
+from experionyx.dossier.entities import (
+    DossierFinding,
+    DossierItem,
+    DossierSnapshot,
+    EvidenceDossier,
+)
 from experionyx.drift.entities import DriftAnalysis, DriftWindow
 from experionyx.errors import (
     ConcurrentModificationError,
@@ -67,6 +73,7 @@ from experionyx.leaderboard.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.reporting.entities import Report, ReportFinding, ReportTemplate
 from experionyx.reproducibility.entities import ReproductionAttempt
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.scheduler.entities import (
@@ -90,7 +97,9 @@ from experionyx.stress.entities import StressAnalysis, StressTrial
 # 17: evidence graphs, graph snapshots, graph nodes and graph edges.
 # 18: reproduction attempts.
 # 19: benchmark protocols, submissions, leaderboard snapshots and entries.
-DB_SCHEMA_VERSION = 19
+# 20: report templates, reports and report findings.
+# 21: evidence dossiers, dossier items, dossier findings and dossier snapshots.
+DB_SCHEMA_VERSION = 21
 
 
 @dataclass(frozen=True)
@@ -449,6 +458,44 @@ _SPECS: dict[type[Entity], _Spec] = {
         refs=(("claim_id", Claim),),
         plain=("target_kind", "target_id", "relation"),
     ),
+    ReportTemplate: _Spec("report_templates", plain=("report_type",), since=20),
+    Report: _Spec(
+        "reports",
+        refs=(("investigation_id", Investigation), ("template_id", ReportTemplate)),
+        plain=("spec_id", "report_type", "status"),
+        since=20,
+    ),
+    ReportFinding: _Spec(
+        "report_findings",
+        refs=(("report_id", Report),),
+        plain=("status",),
+        since=20,
+    ),
+    EvidenceDossier: _Spec(
+        "evidence_dossiers",
+        refs=(("investigation_id", Investigation),),
+        plain=("spec_id", "source_kind"),
+        since=21,
+    ),
+    DossierItem: _Spec(
+        "dossier_items",
+        refs=(("dossier_id", EvidenceDossier),),
+        plain=("item_kind", "source_kind", "source_id"),
+        since=21,
+    ),
+    DossierFinding: _Spec(
+        "dossier_findings",
+        refs=(("dossier_id", EvidenceDossier), ("report_finding_id", ReportFinding)),
+        plain=("status",),
+        optional=("report_finding_id",),
+        since=21,
+    ),
+    DossierSnapshot: _Spec(
+        "dossier_snapshots",
+        refs=(("dossier_id", EvidenceDossier),),
+        plain=("source_evidence_digest",),
+        since=21,
+    ),
 }
 
 
@@ -624,6 +671,19 @@ def _migrate_18_to_19(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_19_to_20(conn: sqlite3.Connection) -> None:
+    """Phase 21-22: report templates, reports and report findings (new tables only)."""
+    for statement in _ddl(upto=20, since=20):
+        conn.execute(statement)
+
+
+def _migrate_20_to_21(conn: sqlite3.Connection) -> None:
+    """Phase 21-22: evidence dossiers, dossier items, dossier findings and dossier snapshots (new
+    tables only)."""
+    for statement in _ddl(upto=21, since=21):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -643,6 +703,8 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     16: _migrate_16_to_17,
     17: _migrate_17_to_18,
     18: _migrate_18_to_19,
+    19: _migrate_19_to_20,
+    20: _migrate_20_to_21,
 }
 
 

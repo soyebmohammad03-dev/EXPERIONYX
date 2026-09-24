@@ -1,13 +1,13 @@
 # Architecture
 
-> **Current state:** Phase 20. Implemented: the domain model ([domain-model.md](domain-model.md)),
+> **Current state:** Phase 22. Implemented: the domain model ([domain-model.md](domain-model.md)),
 > hashing/identity ([identity.md](identity.md)), a `Registry` protocol with a SQLite backend
 > ([registry.md](registry.md)), an execution engine ([execution.md](execution.md)), provenance
 > capture ([provenance.md](provenance.md)), a local artifact store ([artifacts.md](artifacts.md)), a framework-agnostic model/dataset adapter layer with
 > sklearn and PyTorch implementations ([adapters.md](adapters.md),
 > [model-dataset-identity.md](model-dataset-identity.md)) a baseline evaluation and autopsy engine ([evaluation.md](evaluation.md),
 > [observation-vs-conclusion.md](observation-vs-conclusion.md)), a fault injection laboratory
-> ([faults.md](faults.md)), failure discovery and a failure registry ([failures.md](failures.md)) fault interaction analysis ([interactions.md](interactions.md)), reliability profiles ([reliability.md](reliability.md)), robustness benchmarks ([benchmarks.md](benchmarks.md)), and statistical analysis ([statistics.md](statistics.md)), slice analysis ([slices.md](slices.md)), temporal and distribution shift analysis ([drift.md](drift.md)), data quality analysis ([data-quality.md](data-quality.md)), model stress analysis ([stress.md](stress.md)), calibration and uncertainty analysis ([calibration.md](calibration.md)), resource and systems reliability measurement ([resources.md](resources.md)), an experiment scheduler and orchestration layer over every engine above ([scheduler.md](scheduler.md)), an evidence/failure knowledge graph connecting every entity above through typed, versioned relationships ([graph.md](graph.md)), an advanced reproducibility framework classifying exact/deterministic/tolerance/statistical/provenance-only agreement over every engine's own replay ([reproducibility.md](reproducibility.md)), a benchmark protocol and leaderboard system over the existing benchmark engine (protocol-specific, metric-specific, no universal score, see [leaderboard.md](leaderboard.md)) and a CLI ([cli.md](cli.md)).
+> ([faults.md](faults.md)), failure discovery and a failure registry ([failures.md](failures.md)) fault interaction analysis ([interactions.md](interactions.md)), reliability profiles ([reliability.md](reliability.md)), robustness benchmarks ([benchmarks.md](benchmarks.md)), and statistical analysis ([statistics.md](statistics.md)), slice analysis ([slices.md](slices.md)), temporal and distribution shift analysis ([drift.md](drift.md)), data quality analysis ([data-quality.md](data-quality.md)), model stress analysis ([stress.md](stress.md)), calibration and uncertainty analysis ([calibration.md](calibration.md)), resource and systems reliability measurement ([resources.md](resources.md)), an experiment scheduler and orchestration layer over every engine above ([scheduler.md](scheduler.md)), an evidence/failure knowledge graph connecting every entity above through typed, versioned relationships ([graph.md](graph.md)), an advanced reproducibility framework classifying exact/deterministic/tolerance/statistical/provenance-only agreement over every engine's own replay ([reproducibility.md](reproducibility.md)), a benchmark protocol and leaderboard system over the existing benchmark engine (protocol-specific, metric-specific, no universal score, see [leaderboard.md](leaderboard.md)), a research reporting layer that assembles structured, versioned, provenance-linked reports from persisted evidence without re-executing anything ([reporting.md](reporting.md)), an evidence dossier layer providing structured, persisted, snapshot-able research packages with explicit sufficiency analysis over that reporting layer and the graph ([dossier.md](dossier.md)), and a CLI ([cli.md](cli.md)).
 > Everything else below is **planned** and will be introduced
 > incrementally.
 
@@ -21,7 +21,8 @@ real experiments, traceability, reproducibility, testability, modularity, honest
 Domain model; registries (model, dataset, experiment, environment, configuration, artifact, metric,
 failure, drift, evidence); execution engine; adapters (model, dataset); autopsy; fault injection;
 failure discovery; reproducibility/statistics; provenance/trace; drift analysis; reliability
-analysis; evidence graph; dossier generation; CLI; API; research UI.
+analysis; evidence graph; research reporting; evidence dossier generation (done, see
+[reporting.md](reporting.md), [dossier.md](dossier.md)); API; research UI.
 
 ## Dependency direction
 

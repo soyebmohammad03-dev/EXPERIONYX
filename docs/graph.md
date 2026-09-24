@@ -185,6 +185,16 @@ uses for every other entity kind. `ReproductionAttempt.target_id`/`replay_run_id
 artifacts behind them. Neither integration added a single line to `graph.query` or `graph.build`
 beyond a handful of new `ENTITY_TYPES` entries and two `FIELD_RELATION` overrides.
 
+## Phase 21-22 integration: reports and dossiers are graph entities too
+
+`ReportTemplate`, `Report`, `ReportFinding` ([reporting.md](reporting.md)) and
+`EvidenceDossier`, `DossierItem`, `DossierFinding`, `DossierSnapshot` ([dossier.md](dossier.md))
+are registered in `graph.build.ENTITY_TYPES` exactly like every other entity kind, so a
+`Report`'s `investigation_id`/`template_id` and a `ReportFinding`'s `evidence` references, and a
+`DossierItem`/`DossierFinding`'s `dossier_id`, become the same generic field-walk edges this
+module already derives for everything else — no second graph, and no reporting- or
+dossier-specific traversal code in `graph.query`.
+
 ## Known limitations
 
 * `GraphSpec.investigation_id` scopes entities that themselves carry an `investigation_id`; an

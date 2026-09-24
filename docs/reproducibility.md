@@ -194,6 +194,14 @@ for `EQUAL`/`APPROXIMATELY_EQUAL`, 1 otherwise. `compare` is the one ad hoc comm
 tolerance-aware comparison of two stored JSON artifacts that need not come from the same run or
 target, for exploratory use outside the attempt/classification machinery.
 
+### Dossier integration (Phase 22)
+
+`EvidenceDossier.reproduction_attempt_ids` names every `ReproductionAttempt` collected for a
+dossier's investigation, included by reference — a dossier never triggers a new reproduction
+attempt on its own. A dossier with runs in scope but no matching attempt is flagged with an
+explicit `REPRODUCIBILITY_GAP` finding rather than assuming reproduced; see
+[dossier.md](dossier.md).
+
 ### Known limitations
 
 - `NUMERIC_TOLERANCE`/`STATISTICAL` re-comparison only covers documents the target's own engine

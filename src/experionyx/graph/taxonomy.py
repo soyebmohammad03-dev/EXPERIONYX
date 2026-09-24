@@ -63,6 +63,13 @@ class NodeKind(StrEnum):
     EXECUTION_ATTEMPT = "EXECUTION_ATTEMPT"  # att
     UNIT_STATE_TRANSITION = "UNIT_STATE_TRANSITION"  # utr
     REPRODUCTION_ATTEMPT = "REPRODUCTION_ATTEMPT"  # rpa
+    REPORT_TEMPLATE = "REPORT_TEMPLATE"  # rtp
+    REPORT = "REPORT"  # rpt
+    REPORT_FINDING = "REPORT_FINDING"  # rfd
+    EVIDENCE_DOSSIER = "EVIDENCE_DOSSIER"  # dsr
+    DOSSIER_ITEM = "DOSSIER_ITEM"  # dsi
+    DOSSIER_FINDING = "DOSSIER_FINDING"  # dsf
+    DOSSIER_SNAPSHOT = "DOSSIER_SNAPSHOT"  # dsn
     # synthetic (graph-only; never registry entities, never given a registry PREFIX)
     SPLIT = "SPLIT"  # a (dataset_fingerprint, split name) pair
     DESCRIPTOR = "DESCRIPTOR"  # a non-registry FailureRelationship endpoint (class/slice/fault)
@@ -71,24 +78,62 @@ class NodeKind(StrEnum):
 
 # Entity.PREFIX -> NodeKind, for every registry-backed kind (synthetic kinds have no prefix).
 PREFIX_TO_KIND: dict[str, NodeKind] = {
-    "inv": NodeKind.INVESTIGATION, "cfg": NodeKind.CONFIGURATION, "env": NodeKind.ENVIRONMENT,
-    "exp": NodeKind.EXPERIMENT, "run": NodeKind.RUN, "obs": NodeKind.OBSERVATION,
-    "art": NodeKind.ARTIFACT, "clm": NodeKind.CLAIM, "evd": NodeKind.EVIDENCE,
-    "prv": NodeKind.PROVENANCE, "out": NodeKind.RUN_OUTCOME, "mdl": NodeKind.MODEL,
-    "dst": NodeKind.DATASET, "fxp": NodeKind.FAULT_EXPERIMENT, "ftr": NodeKind.FAULT_TRIAL,
-    "fan": NodeKind.FAULT_ANALYSIS, "fsg": NodeKind.FAILURE_SIGNAL, "fcl": NodeKind.FAILURE_CLUSTER,
-    "fmd": NodeKind.FAILURE_MODE, "fev": NodeKind.FAILURE_EVIDENCE, "frl": NodeKind.FAILURE_RELATIONSHIP,
-    "ian": NodeKind.INTERACTION_ANALYSIS, "ief": NodeKind.INTERACTION_EFFECT,
-    "iev": NodeKind.INTERACTION_EVIDENCE, "rpf": NodeKind.RELIABILITY_PROFILE,
-    "rrf": NodeKind.RELIABILITY_REFERENCE, "bmk": NodeKind.BENCHMARK, "brs": NodeKind.BENCHMARK_RESULT,
-    "bun": NodeKind.BENCHMARK_UNIT, "sta": NodeKind.STATISTICAL_ANALYSIS, "sls": NodeKind.SLICE,
-    "san": NodeKind.SLICE_ANALYSIS, "twn": NodeKind.TEMPORAL_WINDOW, "dan": NodeKind.DRIFT_ANALYSIS,
-    "qan": NodeKind.QUALITY_ANALYSIS, "qck": NodeKind.QUALITY_CHECK, "sxa": NodeKind.STRESS_ANALYSIS,
-    "sxt": NodeKind.STRESS_TRIAL, "cba": NodeKind.CALIBRATION_ANALYSIS, "cbr": NodeKind.CALIBRATION_RESULT,
-    "rsa": NodeKind.RESOURCE_ANALYSIS, "rst": NodeKind.RESOURCE_TRIAL, "sch": NodeKind.SCHEDULE,
-    "scr": NodeKind.SCHEDULE_RUN, "sun": NodeKind.SCHEDULE_UNIT, "att": NodeKind.EXECUTION_ATTEMPT,
-    "utr": NodeKind.UNIT_STATE_TRANSITION, "rpa": NodeKind.REPRODUCTION_ATTEMPT,
-}  # fmt: skip
+    "inv": NodeKind.INVESTIGATION,
+    "cfg": NodeKind.CONFIGURATION,
+    "env": NodeKind.ENVIRONMENT,
+    "exp": NodeKind.EXPERIMENT,
+    "run": NodeKind.RUN,
+    "obs": NodeKind.OBSERVATION,
+    "art": NodeKind.ARTIFACT,
+    "clm": NodeKind.CLAIM,
+    "evd": NodeKind.EVIDENCE,
+    "prv": NodeKind.PROVENANCE,
+    "out": NodeKind.RUN_OUTCOME,
+    "mdl": NodeKind.MODEL,
+    "dst": NodeKind.DATASET,
+    "fxp": NodeKind.FAULT_EXPERIMENT,
+    "ftr": NodeKind.FAULT_TRIAL,
+    "fan": NodeKind.FAULT_ANALYSIS,
+    "fsg": NodeKind.FAILURE_SIGNAL,
+    "fcl": NodeKind.FAILURE_CLUSTER,
+    "fmd": NodeKind.FAILURE_MODE,
+    "fev": NodeKind.FAILURE_EVIDENCE,
+    "frl": NodeKind.FAILURE_RELATIONSHIP,
+    "ian": NodeKind.INTERACTION_ANALYSIS,
+    "ief": NodeKind.INTERACTION_EFFECT,
+    "iev": NodeKind.INTERACTION_EVIDENCE,
+    "rpf": NodeKind.RELIABILITY_PROFILE,
+    "rrf": NodeKind.RELIABILITY_REFERENCE,
+    "bmk": NodeKind.BENCHMARK,
+    "brs": NodeKind.BENCHMARK_RESULT,
+    "bun": NodeKind.BENCHMARK_UNIT,
+    "sta": NodeKind.STATISTICAL_ANALYSIS,
+    "sls": NodeKind.SLICE,
+    "san": NodeKind.SLICE_ANALYSIS,
+    "twn": NodeKind.TEMPORAL_WINDOW,
+    "dan": NodeKind.DRIFT_ANALYSIS,
+    "qan": NodeKind.QUALITY_ANALYSIS,
+    "qck": NodeKind.QUALITY_CHECK,
+    "sxa": NodeKind.STRESS_ANALYSIS,
+    "sxt": NodeKind.STRESS_TRIAL,
+    "cba": NodeKind.CALIBRATION_ANALYSIS,
+    "cbr": NodeKind.CALIBRATION_RESULT,
+    "rsa": NodeKind.RESOURCE_ANALYSIS,
+    "rst": NodeKind.RESOURCE_TRIAL,
+    "sch": NodeKind.SCHEDULE,
+    "scr": NodeKind.SCHEDULE_RUN,
+    "sun": NodeKind.SCHEDULE_UNIT,
+    "att": NodeKind.EXECUTION_ATTEMPT,
+    "utr": NodeKind.UNIT_STATE_TRANSITION,
+    "rpa": NodeKind.REPRODUCTION_ATTEMPT,
+    "rtp": NodeKind.REPORT_TEMPLATE,
+    "rpt": NodeKind.REPORT,
+    "rfd": NodeKind.REPORT_FINDING,
+    "dsr": NodeKind.EVIDENCE_DOSSIER,
+    "dsi": NodeKind.DOSSIER_ITEM,
+    "dsf": NodeKind.DOSSIER_FINDING,
+    "dsn": NodeKind.DOSSIER_SNAPSHOT,
+}
 
 
 class RelationType(StrEnum):
