@@ -51,6 +51,7 @@ from experionyx.dossier.entities import (
     DossierSnapshot,
     EvidenceDossier,
 )
+from experionyx.dossier.render import render_markdown as render_dossier_markdown
 from experionyx.dossier.spec import DossierSpec
 from experionyx.dossier.taxonomy import DossierSourceKind
 from experionyx.drift import engine as drift_engine
@@ -2536,38 +2537,7 @@ def _cmd_dossier_validate(args: argparse.Namespace) -> int:
 def _cmd_dossier_export(args: argparse.Namespace) -> int:
     with _open(args.workspace) as reg:
         dossier = reg.get(EvidenceDossier, args.id)
-        items = reg.find(DossierItem, dossier_id=args.id)
-        findings = reg.find(DossierFinding, dossier_id=args.id)
-        lines = [
-            f"# Evidence Dossier: {dossier.research_question}",
-            "",
-            f"- **Dossier ID:** `{dossier.id}`",
-            f"- **Investigation:** `{dossier.investigation_id}`",
-            f"- **Source:** {dossier.source_kind.value} `{dossier.source_id}`",
-            f"- **Reports:** {', '.join(dossier.report_ids) or 'none'}",
-            f"- **Evidence digest:** `{dossier.source_evidence_digest}`",
-            "",
-            "## Findings (sufficiency analysis)",
-            "",
-            "| ID | Status | Statement |",
-            "| --- | --- | --- |",
-            *(
-                f"| `{f.id}` | {f.status.value} | {f.statement} |"
-                for f in sorted(findings, key=lambda f: f.id)
-            ),
-            "",
-            "## Evidence Items",
-            "",
-            *(
-                f"- `{i.id}` ({i.item_kind.value}/{i.source_kind}): `{i.source_id}`"
-                for i in sorted(items, key=lambda i: i.id)
-            ),
-            "",
-            "## Limitations",
-            "",
-            *(f"- {x}" for x in dossier.limitations),
-        ]
-        text = "\n".join(lines)
+        text = render_dossier_markdown(reg, dossier)
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
@@ -4246,6 +4216,20 @@ def _cmd_resources_replay(args: argparse.Namespace) -> int:
     return 0 if out["definition_reproduced"] else 1
 
 
+def _cmd_viz_serve(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+
+        from experionyx.api.app import create_app
+    except ModuleNotFoundError as exc:
+        raise ExperionyxError(
+            "the visualization UI needs optional dependencies: pip install experionyx[viz]"
+        ) from exc
+    app = create_app(args.workspace)
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="experionyx", description="EXPERIONYX: AI Experimental Forensics & Reliability Lab"
@@ -5551,6 +5535,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", default="1")
     p.add_argument("--option", action="append", default=[])
     p.set_defaults(func=_cmd_dataset_register)
+
+    viz = group("viz", "serve the read-only visualization/analysis UI over a workspace")
+    p = viz.add_parser(
+        "serve", help="start the FastAPI+static UI (needs: pip install experionyx[viz])"
+    )
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8420)
+    p.set_defaults(func=_cmd_viz_serve)
     return parser
 
 

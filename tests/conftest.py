@@ -2,6 +2,7 @@ import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -10,6 +11,9 @@ from experionyx.domain import ConfigurationRef, Experiment, ExperimentStatus, In
 from experionyx.execution import Executor
 from experionyx.sqlite import SqliteRegistry
 from factories import T0, configuration, experiment, investigation
+
+if TYPE_CHECKING:
+    from api_world import ApiWorld
 
 
 def git(cwd: Path, *args: str) -> None:
@@ -75,4 +79,16 @@ def lab(tmp_path: Path) -> Iterator[Lab]:
     lab.registry.close()
 
 
-__all__ = ["T0", "Lab", "git", "lab", "make_lab", "make_repo"]
+@pytest.fixture(scope="session")
+def api_world(tmp_path_factory: pytest.TempPathFactory) -> "ApiWorld":
+    """One real, richly populated workspace shared by tests/test_api_*.py (see api_world.py):
+    expensive to build (a real sklearn baseline, fault sweeps, discovery, drift, stats,
+    reliability, graph, report, dossier, reproducibility), so it is built once per session and
+    every test in test_api_*.py only reads from it -- never mutates the shared registry."""
+    pytest.importorskip("sklearn")
+    from api_world import build_api_world
+
+    return build_api_world(tmp_path_factory.mktemp("api"))
+
+
+__all__ = ["T0", "ApiWorld", "Lab", "api_world", "git", "lab", "make_lab", "make_repo"]

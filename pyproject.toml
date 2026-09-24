@@ -24,8 +24,11 @@ sklearn = ["scikit-learn>=1.4"]
 torch = ["torch>=2.2"]
 # The fault library needs numpy (also pulled in by sklearn); the core stays dependency-free.
 faults = ["numpy>=1.26"]
+# The visualization/analysis UI (`experionyx viz serve`): a read-only FastAPI app + static SPA.
+viz = ["fastapi>=0.110,<1", "uvicorn>=0.30,<1"]
 # Upper bounds keep a new major release of a tool from silently breaking CI.
-dev = ["pytest>=8,<10", "ruff>=0.6,<1", "mypy>=1.11,<3"]
+# httpx is only needed for FastAPI's TestClient in tests/test_api_*.py.
+dev = ["pytest>=8,<10", "ruff>=0.6,<1", "mypy>=1.11,<3", "fastapi>=0.110,<1", "httpx>=0.27,<1"]
 
 [project.scripts]
 experionyx = "experionyx.cli:main"
