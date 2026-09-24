@@ -52,6 +52,7 @@ from experionyx.errors import (
     BenchmarkRefusal,
     DesignRefusal,
     ExperionyxError,
+    NotFoundError,
     ProfileRefusal,
     SchedulerRefusal,
 )
@@ -122,6 +123,18 @@ from experionyx.reliability.engine import run_profile
 from experionyx.reliability.entities import ReliabilityProfile
 from experionyx.reliability.registry import ReliabilityProfileRegistry
 from experionyx.reliability.spec import ProfileSpec
+from experionyx.reproducibility.engine import compare_artifact_documents as reproduction_compare
+from experionyx.reproducibility.engine import resolve_attempt as reproduction_resolve
+from experionyx.reproducibility.engine import resolve_target as reproduction_resolve_target
+from experionyx.reproducibility.engine import run_reproduction
+from experionyx.reproducibility.engine import verify_run_artifacts as reproduction_verify
+from experionyx.reproducibility.entities import ReproductionAttempt
+from experionyx.reproducibility.spec import (
+    DEFAULT_ABSOLUTE_TOLERANCE,
+    DEFAULT_RELATIVE_TOLERANCE,
+    ReproductionSpec,
+)
+from experionyx.reproducibility.taxonomy import ComparisonOutcome, ReproductionMode, TargetKind
 from experionyx.resources import compare as resource_compare
 from experionyx.resources import engine as resource_engine
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
@@ -2013,6 +2026,125 @@ def _cmd_graph_replay(args: argparse.Namespace) -> int:
         )  # fmt: skip
         _dump(out)
         return 0 if out["deterministic"] is True else 1
+
+
+def _attempt_row(a: ReproductionAttempt) -> dict[str, object]:
+    return {
+        "id": a.id,
+        "target_kind": a.target_kind.value,
+        "target_id": a.target_id,
+        "attempt": a.attempt,
+        "mode": a.spec.get("mode"),
+        "outcome": a.outcome.value,
+        "sources_changed": a.sources_changed,
+        "replay_run_id": a.replay_run_id,
+        "note": a.note,
+    }
+
+
+def _attempt_full(a: ReproductionAttempt) -> dict[str, object]:
+    return {"id": a.id, **a.to_dict()}
+
+
+def _cmd_reproduce_validate(args: argparse.Namespace) -> int:
+    kind = TargetKind(args.target_kind)
+    with _open(args.workspace) as reg:
+        try:
+            info = reproduction_resolve_target(reg, kind, args.target_id)
+        except NotFoundError as exc:
+            _dump({"valid": False, "error": str(exc)})
+            return 1
+    _dump({"valid": True, **info})
+    return 0
+
+
+def _cmd_reproduce_run(args: argparse.Namespace) -> int:
+    kind = TargetKind(args.target_kind)
+    mode = ReproductionMode(args.mode)
+    spec = ReproductionSpec(kind, args.target_id, mode, args.relative_tolerance, args.absolute_tolerance)  # fmt: skip
+    with _open(args.workspace) as reg:
+        if kind is TargetKind.SCHEDULE:
+            result = run_reproduction(
+                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), spec,
+                investigation_id=args.investigation,
+                open_registry=_scheduler_open_registry(args.workspace),
+                open_executor=_scheduler_open_executor(args.workspace),
+                source_root=Path.cwd(),
+            )  # fmt: skip
+        else:
+            result = run_reproduction(
+                reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), _executor(reg, args.workspace), spec,
+                investigation_id=args.investigation,
+            )  # fmt: skip
+        attempt = reg.get(ReproductionAttempt, result.attempt_id)
+        _emit(_attempt_full(attempt), f"{attempt.id}: {attempt.outcome.value} (mode {mode.value})", args)  # fmt: skip
+    return 0 if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL) else 1  # fmt: skip
+
+
+def _cmd_reproduce_inspect(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        a = reproduction_resolve(reg, args.id)
+        _emit(_attempt_full(a), f"{a.id}: {a.outcome.value}", args)
+    return 0
+
+
+def _cmd_reproduce_compare(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = reproduction_compare(
+            reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR),
+            args.run_a, args.path_a, args.run_b, args.path_b,
+            relative_tolerance=args.relative_tolerance, absolute_tolerance=args.absolute_tolerance,
+        )  # fmt: skip
+        _dump(out)
+    return 0 if out["outcome"] in ("EQUAL", "APPROXIMATELY_EQUAL") else 1
+
+
+def _cmd_reproduce_verify(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        out = reproduction_verify(reg, LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR), args.run_id)  # fmt: skip
+        _dump(out)
+    return 1 if out["corrupted"] else 0
+
+
+def _cmd_reproduce_replay(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        prior = reproduction_resolve(reg, args.id)
+        spec = ReproductionSpec.from_dict(prior.spec)
+        store = LocalArtifactStore(Path(args.workspace) / EXPERIMENTS_DIR)
+        if prior.target_kind is TargetKind.SCHEDULE:
+            result = run_reproduction(
+                reg, store, _executor(reg, args.workspace), spec,
+                investigation_id=prior.investigation_id,
+                open_registry=_scheduler_open_registry(args.workspace),
+                open_executor=_scheduler_open_executor(args.workspace),
+                source_root=Path.cwd(),
+            )  # fmt: skip
+        else:
+            result = run_reproduction(
+                reg, store, _executor(reg, args.workspace), spec, investigation_id=prior.investigation_id
+            )  # fmt: skip
+        attempt = reg.get(ReproductionAttempt, result.attempt_id)
+        _emit(
+            _attempt_full(attempt),
+            f"replay of {prior.id} -> {attempt.id}: {attempt.outcome.value}",
+            args,
+        )
+    return 0 if result.outcome in (ComparisonOutcome.EQUAL, ComparisonOutcome.APPROXIMATELY_EQUAL) else 1  # fmt: skip
+
+
+def _cmd_reproduce_diff(args: argparse.Namespace) -> int:
+    with _open(args.workspace) as reg:
+        a = reproduction_resolve(reg, args.a)
+        b = reproduction_resolve(reg, args.b)
+        doc = {
+            "a": _attempt_row(a),
+            "b": _attempt_row(b),
+            "outcome_changed": a.outcome != b.outcome,
+            "differences_a": list(a.differences),
+            "differences_b": list(b.differences),
+        }
+        _emit(doc, f"diff {a.id} ({a.outcome.value}) vs {b.id} ({b.outcome.value})", args)
+    return 0
 
 
 def _cmd_fault_demo(args: argparse.Namespace) -> int:
@@ -4158,6 +4290,51 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("id")
     p.set_defaults(func=_cmd_graph_replay)
+
+    rp = group("reproduce", "reproducibility framework: what can and cannot be reproduced, and how")  # fmt: skip
+
+    def rp_fmt(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--format", choices=["json", "text"], default="json")
+
+    def rtol(q: argparse.ArgumentParser) -> None:
+        q.add_argument("--relative-tolerance", type=float, default=DEFAULT_RELATIVE_TOLERANCE)
+        q.add_argument("--absolute-tolerance", type=float, default=DEFAULT_ABSOLUTE_TOLERANCE)
+
+    p = rp.add_parser("validate", help="confirm a target exists and report its home investigation/run, without reproducing anything")  # fmt: skip
+    p.add_argument("target_kind", choices=[k.value for k in TargetKind])
+    p.add_argument("target_id")
+    p.set_defaults(func=_cmd_reproduce_validate)
+    p = rp.add_parser("run", help="attempt to reproduce a target against the requested mode; exit 1 unless EQUAL/APPROXIMATELY_EQUAL")  # fmt: skip
+    p.add_argument("target_kind", choices=[k.value for k in TargetKind])
+    p.add_argument("target_id")
+    p.add_argument("--mode", choices=[m.value for m in ReproductionMode], default=ReproductionMode.DETERMINISTIC.value)  # fmt: skip
+    p.add_argument("--investigation", help="required for a SCHEDULE target")
+    rtol(p)
+    rp_fmt(p)
+    p.set_defaults(func=_cmd_reproduce_run)
+    p = rp.add_parser("inspect", help="a persisted reproduction attempt (rpa_...)")
+    p.add_argument("id")
+    rp_fmt(p)
+    p.set_defaults(func=_cmd_reproduce_inspect)
+    p = rp.add_parser("compare", help="ad hoc tolerance-aware comparison of two stored JSON artifacts, possibly from different runs")  # fmt: skip
+    p.add_argument("run_a")
+    p.add_argument("path_a", help="artifact path within run_a, e.g. benchmark/results.json")
+    p.add_argument("run_b")
+    p.add_argument("path_b")
+    rtol(p)
+    p.set_defaults(func=_cmd_reproduce_compare)
+    p = rp.add_parser("verify", help="re-hash a run's artifacts against their recorded digests")
+    p.add_argument("run_id")
+    p.set_defaults(func=_cmd_reproduce_verify)
+    p = rp.add_parser("replay", help="re-attempt a prior reproduction attempt's exact spec as a NEW attempt")  # fmt: skip
+    p.add_argument("id")
+    rp_fmt(p)
+    p.set_defaults(func=_cmd_reproduce_replay)
+    p = rp.add_parser("diff", help="structural diff between two persisted reproduction attempts")
+    p.add_argument("a")
+    p.add_argument("b")
+    rp_fmt(p)
+    p.set_defaults(func=_cmd_reproduce_diff)
 
     datasets = group("dataset", "inspect or register a dataset")
     p = datasets.add_parser("inspect", help="inspect a registered dataset ID or load a source")

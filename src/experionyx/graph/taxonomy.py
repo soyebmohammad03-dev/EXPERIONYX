@@ -62,6 +62,7 @@ class NodeKind(StrEnum):
     SCHEDULE_UNIT = "SCHEDULE_UNIT"  # sun
     EXECUTION_ATTEMPT = "EXECUTION_ATTEMPT"  # att
     UNIT_STATE_TRANSITION = "UNIT_STATE_TRANSITION"  # utr
+    REPRODUCTION_ATTEMPT = "REPRODUCTION_ATTEMPT"  # rpa
     # synthetic (graph-only; never registry entities, never given a registry PREFIX)
     SPLIT = "SPLIT"  # a (dataset_fingerprint, split name) pair
     DESCRIPTOR = "DESCRIPTOR"  # a non-registry FailureRelationship endpoint (class/slice/fault)
@@ -86,7 +87,7 @@ PREFIX_TO_KIND: dict[str, NodeKind] = {
     "sxt": NodeKind.STRESS_TRIAL, "cba": NodeKind.CALIBRATION_ANALYSIS, "cbr": NodeKind.CALIBRATION_RESULT,
     "rsa": NodeKind.RESOURCE_ANALYSIS, "rst": NodeKind.RESOURCE_TRIAL, "sch": NodeKind.SCHEDULE,
     "scr": NodeKind.SCHEDULE_RUN, "sun": NodeKind.SCHEDULE_UNIT, "att": NodeKind.EXECUTION_ATTEMPT,
-    "utr": NodeKind.UNIT_STATE_TRANSITION,
+    "utr": NodeKind.UNIT_STATE_TRANSITION, "rpa": NodeKind.REPRODUCTION_ATTEMPT,
 }  # fmt: skip
 
 

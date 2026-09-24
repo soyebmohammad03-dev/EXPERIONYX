@@ -84,6 +84,13 @@ with scikit-learn. Errors print `error: …` to stderr and exit 2.
 | `experionyx graph query <gsn_…> NAME <node> [--node2 --max-depth --max-visited --kind --relation]` | a named composed query: `evidence-for-claim`, `runs-for-failure-mode`, `analyses-for-run`, `artifacts-for-analysis`, `model-to-failure` / `dataset-to-failure` (needs `--node2`) |
 | `experionyx graph diff <gsn_…> <gsn_…>` | raw added/removed nodes and edges between two snapshots (no verdict) |
 | `experionyx graph replay <gsn_…>` | reconstruct the collect run as a new run and compare; exit 1 unless verified deterministic; see [graph.md](graph.md) |
+| `experionyx reproduce validate <TARGET_KIND> <target-id>` | confirm a target exists and report its home investigation/run, without reproducing anything |
+| `experionyx reproduce run <TARGET_KIND> <target-id> [--mode EXACT\|DETERMINISTIC\|NUMERIC_TOLERANCE\|STATISTICAL\|PROVENANCE_ONLY --investigation I --relative-tolerance F --absolute-tolerance F]` | attempt to reproduce a target; exit 0 for EQUAL/APPROXIMATELY_EQUAL, 1 otherwise; `--investigation` is required for a SCHEDULE target |
+| `experionyx reproduce inspect <rpa_…>` | a persisted reproduction attempt |
+| `experionyx reproduce compare <run> <path> <run> <path> [--relative-tolerance --absolute-tolerance]` | ad hoc tolerance-aware comparison of two stored JSON artifacts, possibly from different runs |
+| `experionyx reproduce verify <run-id>` | re-hash a run's artifacts against their recorded digests |
+| `experionyx reproduce replay <rpa_…>` | re-attempt a prior attempt's exact spec as a NEW attempt |
+| `experionyx reproduce diff <rpa_…> <rpa_…>` | structural diff between two persisted reproduction attempts; see [reproducibility.md](reproducibility.md) |
 
 `-v` logs lifecycle events. `--procedure` is imported with the current directory on `sys.path`
 and executes arbitrary code: only run procedures you trust. Experiments are registered through

@@ -2,7 +2,7 @@
 
 **AI Experimental Forensics & Reliability Laboratory**
 
-> **Status: Phase 19 (evidence and failure knowledge graph).** The typed domain model, a local SQLite registry,
+> **Status: Phase 20 (advanced reproducibility framework).** The typed domain model, a local SQLite registry,
 > an execution engine that records provenance and artifact digests, framework-agnostic model and
 > dataset adapters (concrete: scikit-learn and PyTorch), and a baseline evaluation engine
 > (metrics, calibration, bootstrap intervals, slices, error records, rule-based findings) and a fault injection laboratory (typed, seeded faults; control vs
@@ -135,6 +135,12 @@ See [docs/architecture.md](docs/architecture.md) and
   provenance/evidence metadata, never an inferred causal claim; unresolved references are kept as explicit
   nodes, never dropped; construction is a real, replayable Run; every traversal is bounded and reports
   truncation. No universal graph or reliability score.
+- Advanced reproducibility framework ([docs/reproducibility.md](docs/reproducibility.md)): a classification
+  layer over every engine's own `replay_check`, distinguishing EXACT/DETERMINISTIC/NUMERIC_TOLERANCE/
+  STATISTICAL/PROVENANCE_ONLY agreement (never one binary "reproducible" flag), with environment and
+  artifact-integrity checks, scheduler and graph integration (a `REPRODUCTION` unit kind; a
+  `ReproductionAttempt` node connected by `REPRODUCED_BY`/`COMPARED_WITH` edges). Never promises
+  bit-for-bit reproduction the platform cannot guarantee; a reproduction attempt never mutates its target.
 - CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
   ([docs/cli.md](docs/cli.md))
 - Tests, Ruff, strict mypy, and a GitHub Actions workflow (not yet run on GitHub)

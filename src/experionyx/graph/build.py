@@ -59,6 +59,7 @@ from experionyx.interactions.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import Registry
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.reproducibility.entities import ReproductionAttempt
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.scheduler.entities import (
     ExecutionAttempt,
@@ -87,6 +88,7 @@ ENTITY_TYPES: tuple[type[Entity], ...] = (
     CalibrationAnalysis, CalibrationResult,
     ResourceAnalysis, ResourceTrial,
     Schedule, ScheduleRun, ScheduleUnit, ExecutionAttempt, UnitStateTransition,
+    ReproductionAttempt,
 )  # fmt: skip
 
 _ID_RE = re.compile(r"[a-z]{3}_[0-9a-f]{32}")
@@ -123,6 +125,8 @@ FIELD_RELATION: dict[str, RelationType] = {
     "model_record_id": RelationType.USES_MODEL,
     "dataset_id": RelationType.USES_DATASET,
     "dataset_record_id": RelationType.USES_DATASET,
+    "target_id": RelationType.REPRODUCED_BY,
+    "replay_run_id": RelationType.COMPARED_WITH,
 }
 
 _DESCRIPTOR_ENDPOINTS = frozenset(

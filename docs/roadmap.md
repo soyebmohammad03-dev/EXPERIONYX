@@ -25,7 +25,11 @@
     typed, versioned relationships derived generically from the registry's own references; edges
     are provenance/evidence metadata, never an inferred causal claim; unresolved references are
     kept as explicit nodes, never dropped; see [graph.md](graph.md))
-20. Reliability Analysis (statistical, building on profiles and benchmarks)
+20. Advanced Reproducibility & Experiment Replay (done: a classification layer over every engine's
+    own `replay_check` distinguishing exact/deterministic/tolerance/statistical/provenance-only
+    agreement, environment and artifact-integrity checks, and scheduler/graph integration; never
+    promises bit-for-bit reproduction the platform cannot guarantee; see
+    [reproducibility.md](reproducibility.md)) + Benchmark & Leaderboard System
 21. Research validation
 22. Advanced UI/API
 23. Public release / reproducibility package

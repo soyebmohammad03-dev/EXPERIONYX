@@ -43,6 +43,9 @@ from experionyx.provenance import FailureStage, RunOutcome
 from experionyx.registry import Registry
 from experionyx.reliability.engine import run_profile
 from experionyx.reliability.spec import ProfileSpec
+from experionyx.reproducibility.engine import run_reproduction
+from experionyx.reproducibility.spec import ReproductionSpec
+from experionyx.reproducibility.taxonomy import TargetKind
 from experionyx.resources.engine import run_resource_request
 from experionyx.resources.spec import ResourceSpec
 from experionyx.scheduler.taxonomy import FailureCategory, UnitKind, UnitState
@@ -289,6 +292,14 @@ def _dispatch_statistical(registry: Registry, store: ArtifactStore, params: Mapp
     return _ok(analysis.id, None)
 
 
+def _dispatch_reproduction(registry: Registry, store: ArtifactStore, executor: Executor, investigation_id: str, params: Mapping[str, object]) -> DispatchOutcome:  # fmt: skip
+    spec = ReproductionSpec.from_dict(dict(params))
+    if spec.target_kind is TargetKind.SCHEDULE:
+        raise DispatchError("a scheduled REPRODUCTION unit cannot target a SCHEDULE (no nested scheduling)")  # fmt: skip
+    result = run_reproduction(registry, store, executor, spec, investigation_id=investigation_id)
+    return _ok(result.attempt_id, result.replay_run_id)
+
+
 def dispatch(
     kind: UnitKind,
     registry: Registry,
@@ -332,6 +343,8 @@ def dispatch(
             return _dispatch_profile(registry, store, executor, investigation_id, payload)
         if kind is UnitKind.STATISTICAL_ANALYSIS:
             return _dispatch_statistical(registry, store, payload)
+        if kind is UnitKind.REPRODUCTION:
+            return _dispatch_reproduction(registry, store, executor, investigation_id, payload)
         raise DispatchError(f"no dispatcher for unit kind {kind.value}")
     except Exception as exc:  # a dispatch NEVER raises: every failure becomes a recorded outcome
         return _from_exception(exc)

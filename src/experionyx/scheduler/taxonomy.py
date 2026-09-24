@@ -25,6 +25,7 @@ class UnitKind(StrEnum):
     FAILURE_DISCOVERY = "FAILURE_DISCOVERY"
     RELIABILITY_PROFILE = "RELIABILITY_PROFILE"
     STATISTICAL_ANALYSIS = "STATISTICAL_ANALYSIS"
+    REPRODUCTION = "REPRODUCTION"  # a reproduction attempt at another unit's evidence; never targets a SCHEDULE  # fmt: skip
 
 
 # RESOURCE measures wall-clock/CPU/memory of the live machine: replaying it can reproduce the

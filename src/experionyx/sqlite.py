@@ -61,6 +61,7 @@ from experionyx.interactions.entities import (
 from experionyx.provenance import Provenance, RunOutcome
 from experionyx.registry import E
 from experionyx.reliability.entities import ReliabilityProfile, ReliabilityReference
+from experionyx.reproducibility.entities import ReproductionAttempt
 from experionyx.resources.entities import ResourceAnalysis, ResourceTrial
 from experionyx.scheduler.entities import (
     ExecutionAttempt,
@@ -81,7 +82,8 @@ from experionyx.stress.entities import StressAnalysis, StressTrial
 # 15: resource analyses and per-pass resource trials.
 # 16: schedules, schedule runs, schedule units, execution attempts and unit state transitions.
 # 17: evidence graphs, graph snapshots, graph nodes and graph edges.
-DB_SCHEMA_VERSION = 17
+# 18: reproduction attempts.
+DB_SCHEMA_VERSION = 18
 
 
 @dataclass(frozen=True)
@@ -395,6 +397,13 @@ _SPECS: dict[type[Entity], _Spec] = {
         plain=("relation",),
         since=17,
     ),
+    ReproductionAttempt: _Spec(
+        "reproduction_attempts",
+        refs=(("investigation_id", Investigation), ("run_id", Run)),
+        plain=("target_kind", "target_id", "attempt", "outcome"),
+        optional=("run_id",),
+        since=18,
+    ),
     Claim: _Spec("claims", refs=(("investigation_id", Investigation),), plain=("status",)),
     Evidence: _Spec(
         "evidence",
@@ -563,6 +572,12 @@ def _migrate_16_to_17(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_17_to_18(conn: sqlite3.Connection) -> None:
+    """Phase 19-20: reproduction attempts (new table only)."""
+    for statement in _ddl(upto=18, since=18):
+        conn.execute(statement)
+
+
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
@@ -580,6 +595,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     14: _migrate_14_to_15,
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
+    17: _migrate_17_to_18,
 }
 
 
