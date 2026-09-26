@@ -1,243 +1,229 @@
-# EXPERIONYX
+<p align="center">
+  <img src="docs/assets/experionyx-banner.svg" alt="EXPERIONYX — AI Experimental Forensics &amp; Reliability Laboratory" width="720">
+</p>
 
-**AI Experimental Forensics & Reliability Laboratory**
+<p align="center">
+  <a href="https://github.com/soyebmohammad03-dev/EXPERIONYX/actions/workflows/ci.yml"><img src="https://github.com/soyebmohammad03-dev/EXPERIONYX/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue" alt="Python 3.11 and 3.12">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-informational" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/mypy-strict-informational" alt="Strict mypy">
+</p>
 
-EXPERIONYX is an AI experimental forensics and reliability laboratory for controlled
-experimentation, failure discovery, statistical analysis, reproducibility, provenance, and
-evidence-backed research reporting.
+An evidence-driven laboratory for controlled experimentation, failure discovery, statistical
+analysis, reproducibility, provenance, benchmarking, and reliability analysis of AI/ML systems —
+every result traceable back to a real run, not asserted from a single lucky seed.
 
-> **Status: Phase 23–24 (visualization/analysis API+UI and final release hardening) complete.**
-> Every subsystem listed under "What exists today" below is implemented, tested, and reachable
-> both from the CLI and from a read-only HTTP API + small vanilla-JS UI
-> (`experionyx viz serve`, see [docs/visualization.md](docs/visualization.md) and
-> [docs/api.md](docs/api.md)). See [docs/roadmap.md](docs/roadmap.md) for the phase-by-phase
-> history and [docs/limitations.md](docs/limitations.md) for what is genuinely still bounded.
+> Every subsystem below is implemented, tested, and reachable both from the CLI and from a
+> read-only HTTP API + vanilla-JS UI (`experionyx viz serve`). See [docs/roadmap.md](docs/roadmap.md)
+> for phase history and [docs/limitations.md](docs/limitations.md) for what is genuinely bounded.
 
-## Problem
+## Why EXPERIONYX exists
 
-AI/ML results are routinely reported from a single seed, a single run and an unrecorded
+AI/ML results are routinely reported from a single seed, a single run, and an unrecorded
 environment. Failure modes are found anecdotally, reproducibility is assumed rather than measured,
-and conclusions are rarely traceable to observations. EXPERIONYX aims to be a laboratory for
-investigating the behavior, failure modes, reproducibility, provenance and longitudinal
-reliability of AI/ML systems, with every conclusion traceable to real measurements.
+and conclusions are rarely traceable to observations.
 
-## The research lifecycle
+EXPERIONYX is built around the complete evidence lifecycle rather than around tracking metrics:
 
 ```
-register model/dataset → run baseline → apply controlled fault
-  → discover/analyze failure → statistical analysis → reliability evidence
-  → inspect graph → reproducibility check → benchmark (optional)
-  → generate report → build evidence dossier → immutable snapshot
-  → inspect via API/UI → export Markdown
+experiment → controlled perturbation → failure discovery → statistical analysis
+  → reliability analysis → provenance → reproducibility → evidence graph
+  → research report → evidence dossier
 ```
 
-`examples/end_to_end_workflow.py` runs this exact sequence against real (small, deterministic)
-data — no mocks — and prints the API/UI paths a researcher would open to inspect each result:
+This is a different focus than a conventional experiment tracker: EXPERIONYX does not just log
+metrics from your training runs, it actively perturbs a model/dataset under controlled faults,
+discovers and clusters failures, tests whether effects are statistically real, and keeps every
+resulting claim linked back to the evidence it came from. It does not aim to replace general MLOps
+platforms — it is a research instrument for reliability, not a training or deployment pipeline.
 
-```bash
-pip install -e ".[dev,sklearn,faults,viz]"
-python examples/end_to_end_workflow.py
-experionyx --workspace .experionyx-example viz serve   # then open http://127.0.0.1:8420/
-```
+## What EXPERIONYX does
 
-## What EXPERIONYX does not claim to solve
+- **Experiment & provenance** — traced runs with recorded environment, seed, configuration, and
+  content-addressed artifacts.
+- **Controlled perturbation** — fault injection, model stress, and data-quality checks, all
+  seeded and replayable.
+- **Failure discovery** — normalized failure signals, interpretable clustering, and a validated
+  discovery-to-confirmation lifecycle.
+- **Statistical analysis** — bootstrap intervals, effect sizes, permutation tests, and explicit
+  multiple-comparison correction.
+- **Reliability & robustness** — a ten-dimension, evidence-first reliability profile. No composite
+  score, no ranking, no "best model" verdict — see [docs/reliability.md](docs/reliability.md).
+- **Distribution shift, calibration, resources** — longitudinal drift, probability calibration,
+  and systems/resource measurements, each with explicit uncertainty.
+- **Knowledge & failure graph** — a deterministic, bounded-traversal graph over every entity above.
+- **Reproducibility** — a classification (EXACT / DETERMINISTIC / NUMERIC_TOLERANCE / STATISTICAL /
+  PROVENANCE_ONLY) of how well a result reproduces — never a single pass/fail flag.
+- **Benchmarking** — protocol-scoped comparisons with reproducibility and resource context kept
+  separate from predictive metrics.
+- **Research reporting & evidence dossiers** — versioned artifacts assembled entirely from
+  already-persisted evidence; a claim without a resolvable evidence reference cannot exist.
+- **Visualization** — a read-only FastAPI + vanilla-JS UI over every result above.
 
-- It does not decide whether one model is "better" than another. Benchmarks and reliability
-  profiles never produce a composite score, ranking, or "best model" verdict — see
-  [leaderboard.md](docs/leaderboard.md) and [reliability.md](docs/reliability.md).
-  Comparisons are protocol-specific, metric-specific, and always show their own scope.
-- It does not infer causation from an observational comparison, a fault effect, or a failure
-  cluster — see [observation-vs-conclusion.md](docs/observation-vs-conclusion.md). A finding is a
-  statement about what was measured, never a claim about why.
-- It does not treat missing or unavailable evidence as a negative result; unavailable is a
-  distinct, explicit status everywhere in the system, never a `0` or a silent omission.
-- It does not promise bit-for-bit reproducibility the underlying platform cannot guarantee, and it
-  does not measure portable, cross-machine resource/timing numbers — see
-  [reproducibility.md](docs/reproducibility.md) and [resources.md](docs/resources.md).
-- It is not a GPU-scale or cluster-scale system: it is laptop-first, CPU-first, and built around
-  small public datasets. See [docs/limitations.md](docs/limitations.md) for the complete list.
+Full capability-by-capability detail: [docs/README.md](docs/README.md).
 
-## Philosophy
+## Research lifecycle
 
-Evidence over assertion; reproducibility over convenience; negative results are valid;
-no fabricated evidence; statistical humility; explicit uncertainty; resource awareness.
-See [docs/methodology.md](docs/methodology.md).
+<p align="center">
+  <img src="docs/assets/research-lifecycle.svg" alt="EXPERIONYX research lifecycle: model/dataset, experiment, execution and provenance, baseline evaluation, fault/stress/data-quality, failure discovery, statistical analysis, reliability/robustness, distribution shift/calibration/resources, knowledge graph, reproducibility, benchmarking, research reporting, evidence dossier, visualization" width="460">
+</p>
+
+Every stage persists evidence the next stage reads; nothing downstream re-executes an experiment or
+recomputes a statistic. `examples/end_to_end_workflow.py` runs this exact sequence against real
+(small, deterministic) data — no mocks.
 
 ## Architecture
 
-```
-MODEL → BASELINE → AUTOMATED AUTOPSY → CONTROLLED FAULT INJECTION → FAILURE DISCOVERY
-→ EXPERIMENT TRACE → REPRODUCIBILITY ANALYSIS → LONGITUDINAL DRIFT ANALYSIS
-→ STATISTICAL EVIDENCE → RELIABILITY ANALYSIS → EVIDENCE-BACKED DOSSIER → VISUALIZATION/API
-```
+<p align="center">
+  <img src="docs/assets/architecture-overview.svg" alt="EXPERIONYX architecture: CLI and API/UI call the same analysis engines; engines read and write the domain/registry layer; the knowledge graph, reproducibility, and benchmark/leaderboard layers are derived read-only views; reporting and evidence dossiers sit on top; SQLite and content-addressed artifact storage underneath" width="640">
+</p>
 
-See [docs/architecture.md](docs/architecture.md) and
-[docs/experiment-lifecycle.md](docs/experiment-lifecycle.md).
+The CLI and the visualization API are two thin interfaces over the same engines and the same
+registry — the UI never recomputes an analysis or duplicates engine logic. Detail:
+[docs/architecture.md](docs/architecture.md).
 
-## What exists today
+## Evidence & provenance model
 
-- `src/` layout Python package `experionyx` (zero runtime dependencies)
-- `experionyx --version` and `experionyx info` (report real package/environment facts)
-- Immutable, validated domain model: Investigation, Experiment, Run, Observation, Artifact,
-  Claim, Evidence, and content-addressed configuration/environment records
-  ([docs/domain-model.md](docs/domain-model.md))
-- Deterministic canonical hashing and IDs ([docs/identity.md](docs/identity.md))
-- Append-only registry protocol with a SQLite backend and transactions
-  ([docs/registry.md](docs/registry.md))
-- Execution engine ([docs/execution.md](docs/execution.md)): runs a Python procedure as a traced
-  Run, captures environment/source/seed/configuration ([docs/provenance.md](docs/provenance.md)),
-  hashes artifacts ([docs/artifacts.md](docs/artifacts.md)), records failures, and can request
-  replays as new runs. Replay is not reproduction verification.
-- Adapter layer ([docs/adapters.md](docs/adapters.md)): explicit typed capabilities, model/dataset
-  identity and fingerprints ([docs/model-dataset-identity.md](docs/model-dataset-identity.md)),
-  registered models/datasets verified before every run and recorded in provenance, contract
-  tests every adapter must pass. sklearn and PyTorch are the *initial* integrations, optional
-  extras; the core imports neither.
-- Baseline evaluation and autopsy ([docs/evaluation.md](docs/evaluation.md)): a metric registry,
-  confidence/calibration, bootstrap intervals, class-imbalance and slice analysis, error records,
-  latency, transparent rule-based findings linked to evidence, and structured comparison. It
-  reports measurements and observations, not causes
-  ([docs/observation-vs-conclusion.md](docs/observation-vs-conclusion.md)).
-- Fault injection ([docs/faults.md](docs/faults.md)): a versioned fault registry (noise, dropout,
-  missingness, scaling, occlusion, label corruption, compound faults), deterministic seeding and
-  scopes, real parameter sweeps and repeated seeds against a baseline control, degradation
-  measurement, transparent effect thresholds, and evidence links. It measures effects; it does not
-  declare models failed.
-- Failure registry and discovery ([docs/failures.md](docs/failures.md)): normalized failure signals
-  extracted from stored evaluations and fault experiments, interpretable similarity with reasons,
-  deterministic clustering with stability diagnostics, configurable evidence criteria, a
-  reproduction check, and a validated lifecycle (`DISCOVERED` to `CONFIRMED`) in which nothing is
-  confirmed automatically. It groups measured signals; it makes no causal claim and no LLM is
-  involved.
-- Fault interaction analysis ([docs/interactions.md](docs/interactions.md)): a validated four-cell
-  design (control, A, B, A+B, optionally B+A), the additive interaction contrast with every
-  intermediate value, repeated trials with explicit pairing, a seeded bootstrap over trials, order
-  effects, verified per-sample alignment, failure-mode comparison, a lifecycle needing an
-  independent replicate and a human decision, and deterministic replay. It reports observed
-  contrasts; it never claims that one fault causes another.
-- Reliability profiles ([docs/reliability.md](docs/reliability.md)): an evidence-first summary of one
-  evaluated model/dataset/configuration across ten dimensions (baseline, fault, failure prevalence and
-  severity, interaction, slice, reproducibility, uncertainty, latency, calibration), each with an explicit
-  status and a source reference for every observation. Incompatible sources are refused, profiles compare
-  by raw differences, and there is no score, ranking or verdict.
-- Robustness benchmarks ([docs/benchmarks.md](docs/benchmarks.md)): a versioned protocol (fault grids,
-  seeds, interaction pairs, analysis settings) expanded into explicit experiment units, executed through
-  the fault laboratory, failure discovery, interaction analysis and reliability profiles, and reported as
-  raw evidence plus a coverage account of what did and did not run. Two results compare only under an
-  identical protocol, and there is no score, ranking or verdict.
-- Statistical analysis ([docs/statistics.md](docs/statistics.md)): deterministic bootstrap intervals
-  (percentile and BCa), paired and unpaired comparison with effect sizes and exact or seeded permutation
-  tests, explicit multiple-comparison correction, Wilson intervals, and reproducible, registered analyses
-  over persisted evidence. Statuses are explicit; a p-value is never a claim.
-- Slice and subgroup analysis ([docs/slices.md](docs/slices.md)): typed, deterministic slice definitions,
-  three-valued membership that never treats missing metadata as a match, per-slice metrics with uncertainty,
-  explicit comparisons, and per-slice fault, failure-mode and interaction evidence. No group is ranked and no
-  fairness score is produced.
-- Temporal and distribution shift ([docs/drift.md](docs/drift.md)): explicitly ordered, reproducible windows;
-  covariate (per feature), label, prediction and performance differences with uncertainty and Phase 10
-  multiple-comparison correction; slice-aware; evidence links to failure modes, reliability profiles and
-  benchmarks. No drift score, no causal or concept-drift claim.
-- Data quality laboratory ([docs/data-quality.md](docs/data-quality.md)): a versioned, deterministic quality
-  specification and typed checks (schema, missingness, duplicates and identifiers, numeric and categorical
-  validity, target quality, leakage indicators, split and temporal checks, group comparisons) with explicit
-  statuses, exact affected rows, Phase 10 statistics, optional slices and windows, and replay. No quality
-  score; warnings are evidence, not verdicts.
-- Model stress laboratory ([docs/stress.md](docs/stress.md)): controlled stress of inputs (reusing the Fault
-  Laboratory), parameters, decision thresholds and evaluation conditions, expanded into explicit
-  replayable trials against a validated baseline, with paired Phase 10 statistics, slices, failure
-  discovery and interaction analysis. No robustness score, no causal claim.
-- Calibration & uncertainty laboratory ([docs/calibration.md](docs/calibration.md)): whether a model's
-  probabilities correspond to observed correctness (top-label and classwise reliability, ECE/MCE, Brier,
-  log loss), post-hoc Platt/isotonic calibration with a strict calibration/evaluation separation,
-  statistical uncertainty of the metrics (Wilson and seeded bootstrap), descriptive predictive dispersion,
-  and explicit slice, window and stress contexts, all replayable. Confidence is not automatically
-  uncertainty; unsupported uncertainty is reported unavailable; no universal calibration or uncertainty score.
-- Resource & systems reliability laboratory ([docs/resources.md](docs/resources.md)): real measurements of
-  latency, throughput, batch-size and worker-count behaviour, timeouts and failures, process CPU time and
-  peak memory, from repeated warmed-up trials with raw timings preserved, Phase 10 intervals and corrected
-  comparisons, provenance and replay of the definition and the model outputs. Every number is an
-  environment-specific engineering measurement; unsupported measurements are reported unavailable; no
-  composite resource score, and performance measurement is not reliability.
-- Experiment scheduler & orchestration ([docs/scheduler.md](docs/scheduler.md)): a durable, resumable,
-  dependency-aware orchestration layer over every existing engine (fault injection, failure discovery,
-  interaction analysis, benchmarks, statistical analysis, slices, drift, data quality, stress, calibration,
-  resources) via a thin dispatcher that never duplicates their logic. Compact specs expand deterministically
-  into an explicit, validated dependency graph with deterministic identity, ordering and a real state
-  machine; retries create new attempts without overwriting earlier ones; a resumed run never re-dispatches
-  already-succeeded work; concurrency is bounded and deterministic; dry-run executes zero experiments; every
-  plan, dispatch, retry, skip, block and outcome is recorded and auditable. No hidden work, no fabricated
-  resource guarantees, no forced kill of a running dispatch.
-- Evidence and failure knowledge graph ([docs/graph.md](docs/graph.md)): a deterministic, queryable graph
-  connecting every existing entity (models, datasets, splits, experiments, runs, faults, stresses, temporal
-  windows, data quality, calibration, resources, failure signals/clusters/modes, statistics, interactions,
-  reliability profiles, benchmarks, claims, evidence, artifacts, scheduler units) through a closed, versioned
-  relationship vocabulary derived generically from the registry's own references. Edges are
-  provenance/evidence metadata, never an inferred causal claim; unresolved references are kept as explicit
-  nodes, never dropped; construction is a real, replayable Run; every traversal is bounded and reports
-  truncation. No universal graph or reliability score.
-- Advanced reproducibility framework ([docs/reproducibility.md](docs/reproducibility.md)): a classification
-  layer over every engine's own `replay_check`, distinguishing EXACT/DETERMINISTIC/NUMERIC_TOLERANCE/
-  STATISTICAL/PROVENANCE_ONLY agreement (never one binary "reproducible" flag), with environment and
-  artifact-integrity checks, scheduler and graph integration (a `REPRODUCTION` unit kind; a
-  `ReproductionAttempt` node connected by `REPRODUCED_BY`/`COMPARED_WITH` edges). Never promises
-  bit-for-bit reproduction the platform cannot guarantee; a reproduction attempt never mutates its target.
-- Benchmark protocol & leaderboard system ([docs/leaderboard.md](docs/leaderboard.md)): a reporting/
-  organization layer over the existing Phase 9 benchmark engine — model-independent protocol identity
-  (the real expanded `protocol_hash`), provenance-linked submissions (never anonymous), immutable
-  leaderboard snapshots, protocol-constrained metric-specific comparisons, explicit multiple-comparison
-  correction (reusing Phase 10), reproducibility-state and resource-context reporting kept separate from
-  predictive metrics. No universal score, no "best model" verdict, no combined ranking.
-- Research reporting ([docs/reporting.md](docs/reporting.md)): versioned, deterministic reports
-  assembled entirely from evidence every prior engine already persisted — it never re-executes an
-  experiment or recomputes a statistic. Claims cannot exist without a resolvable evidence
-  reference; a section without supporting evidence is recorded as an explicit gap rather than
-  omitted or invented; statistical results are rendered verbatim (effect size, interval, sample
-  size, method, p-value, correction) never reinterpreted; templates are versioned so an old
-  report stays reproducible after a template changes; Markdown is the canonical export, with a
-  thin derived HTML export.
-- Evidence dossiers ([docs/dossier.md](docs/dossier.md)): structured, persisted research packages
-  layered on reporting and the evidence graph — deterministic construction from an investigation,
-  report, run, failure mode, benchmark result, reliability profile, or graph snapshot; an explicit
-  evidence-sufficiency analysis (missing/unavailable/conflicting evidence, provenance and
-  reproducibility gaps — never hidden); conflicting statistical evidence is preserved and
-  cross-referenced, never auto-resolved; immutable, content-addressed snapshots that a later
-  experiment cannot silently alter.
-- Visualization / analysis API+UI ([docs/visualization.md](docs/visualization.md),
-  [docs/api.md](docs/api.md)): a read-only FastAPI surface plus a small hand-written vanilla-JS SPA
-  over every engine above's own read APIs, served with `experionyx viz serve`. Every route calls
-  an existing `get`/`find`/`search`/`compare`/`document` method — no analysis is recomputed here,
-  no aggregate reliability score or "best model" verdict is ever introduced, missing evidence is
-  always an explicit "unavailable", and every list/graph view is bounded and paginated.
-- CLI over a real workspace: `status`, `execute`, `replay`, `run`, `provenance`, `verify`, ...
-  ([docs/cli.md](docs/cli.md))
-- Tests, Ruff, strict mypy, and a GitHub Actions CI workflow (Python 3.11 and 3.12)
+Every entity is immutable and validated (`Investigation`, `Experiment`, `Run`, `Observation`,
+`Artifact`, `Claim`, `Evidence`); every run records its environment, seed, configuration, and
+content-addressed, digest-verified artifacts. Reports and dossiers assemble only from evidence
+already persisted by prior engines — they never re-run an experiment. Missing or unavailable
+evidence is always an explicit status, never a silent `0` or omission. See
+[docs/domain-model.md](docs/domain-model.md) and [docs/provenance.md](docs/provenance.md).
 
-## Hardware philosophy
+## Visualization
 
-Laptop-first (developed on an 8 GB Apple Silicon machine): CPU-first, small public datasets,
-resumable and bounded-parallel execution. No paid APIs, GPUs or clusters in the scientific core.
+`experionyx viz serve` starts a read-only FastAPI + vanilla-JS UI over a workspace. These are real
+screenshots of a real workspace produced by `examples/end_to_end_workflow.py` — not mockups.
 
-## Development
+<table>
+<tr>
+<td width="50%">
+<img src="docs/assets/screenshots/investigations-list.jpg" alt="Investigations list showing two real investigations with their research questions" width="100%">
+<br><sub>Investigations list</sub>
+</td>
+<td width="50%">
+<img src="docs/assets/screenshots/reliability-profile.jpg" alt="Reliability profile page showing per-dimension status, never a single aggregate score" width="100%">
+<br><sub>Reliability profile — per-dimension status, no aggregate score</sub>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/assets/screenshots/research-report.jpg" alt="Research report page showing claims and findings, each with a supported status and a link to its evidence" width="100%">
+<br><sub>Research report — every claim links to its evidence</sub>
+</td>
+<td width="50%">
+<img src="docs/assets/screenshots/evidence-dossier.jpg" alt="Evidence dossier page showing explicit evidence gaps and sufficiency findings, including MISSING_EXP statuses" width="100%">
+<br><sub>Evidence dossier — evidence gaps are explicit, not hidden</sub>
+</td>
+</tr>
+</table>
 
-Requires Python 3.11+. The importable library (domain, registry, graph, reporting) has no runtime
-dependencies. The `experionyx` CLI wires every subsystem into one dispatcher, so in practice it
-needs the `faults` extra (numpy) for anything beyond bare experiment/run bookkeeping — install it
-even if you don't inject faults yourself. Frameworks are extras: `pip install -e ".[sklearn]"`,
-`".[torch]"`, `".[faults]"` (numpy, required by the CLI — see [limitations](docs/limitations.md)),
-`".[viz]"` (FastAPI + uvicorn, for `experionyx viz serve`); add `dev` for the test tools.
+More views (knowledge graph, failure explorer) and full endpoint reference:
+[docs/visualization.md](docs/visualization.md), [docs/api.md](docs/api.md).
+
+## Quick start
 
 ```bash
+git clone https://github.com/soyebmohammad03-dev/EXPERIONYX.git
+cd EXPERIONYX
 python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,sklearn,faults,viz]"
+
+experionyx info                                  # package/environment facts
+python examples/end_to_end_workflow.py           # runs the full lifecycle on real, small data
+experionyx --workspace .experionyx-example viz serve   # open http://127.0.0.1:8420/
+```
+
+The `experionyx` CLI wires every subsystem into one dispatcher, so it needs the `faults` extra
+(numpy) for anything beyond bare experiment/run bookkeeping — install it even if you never inject a
+fault yourself. `sklearn`/`torch` are optional model/dataset adapters; `viz` adds the FastAPI UI.
+See [docs/limitations.md](docs/limitations.md#packaging-and-cli) for the exact boundary.
+
+## Canonical research workflow
+
+`examples/end_to_end_workflow.py` is the one canonical, real workflow: model/dataset registration →
+baseline → controlled fault → failure discovery → drift/statistical analysis → reliability →
+graph snapshot → reproducibility check → research report → evidence dossier → immutable snapshot →
+visualization → Markdown export. It prints real generated IDs and the exact UI URLs to open each
+result — nothing in its output is fabricated or replayed from a fixture.
+
+## CLI usage
+
+```bash
+experionyx --help                 # full command list
+experionyx status                 # summarize a workspace registry
+experionyx experiment <id>        # show an experiment and its runs
+experionyx provenance <run-id>    # show a run's recorded environment/seed/config
+experionyx reliability --help     # evidence-first reliability profiles (no score)
+experionyx report --help          # research reporting
+experionyx dossier --help         # evidence dossiers
+experionyx viz serve              # start the visualization UI
+```
+
+Full reference: [docs/cli.md](docs/cli.md).
+
+## Testing and quality
+
+```bash
 pip install -e ".[dev,sklearn,torch,faults,viz]"
 pytest && ruff check . && ruff format --check . && mypy
 ```
 
-Details: [docs/development.md](docs/development.md), [CONTRIBUTING.md](CONTRIBUTING.md).
+Full suite, strict mypy, and Ruff are enforced on every push across Python 3.11 and 3.12 in CI
+(`.github/workflows/ci.yml`). Details: [docs/development.md](docs/development.md).
 
-## Roadmap
+## Reproducibility
 
-Provisional; see [docs/roadmap.md](docs/roadmap.md). Research directions are drafts:
-[docs/research-questions.md](docs/research-questions.md).
+Every engine exposes its own `replay_check`; a dedicated reproducibility layer classifies agreement
+as EXACT, DETERMINISTIC, NUMERIC_TOLERANCE, STATISTICAL, or PROVENANCE_ONLY — never one binary
+"reproducible" flag — and checks environment and artifact-integrity separately. EXPERIONYX never
+promises bit-for-bit reproduction the underlying platform (BLAS, GPU kernels, OS scheduler) cannot
+guarantee. Detail: [docs/reproducibility.md](docs/reproducibility.md).
+
+## Documentation
+
+Full index: [docs/README.md](docs/README.md). Highlights: [architecture](docs/architecture.md),
+[experiment lifecycle](docs/experiment-lifecycle.md), [statistics](docs/statistics.md),
+[reliability](docs/reliability.md), [knowledge graph](docs/graph.md),
+[benchmarking](docs/benchmarks.md), [reporting](docs/reporting.md), [dossiers](docs/dossier.md).
+
+## Research credibility
+
+EXPERIONYX distinguishes what it actually does from what it doesn't and what's still ahead:
+
+- **Implemented** — every capability listed above, tested and reachable from both the CLI and the
+  API/UI (see [docs/roadmap.md](docs/roadmap.md) for phase history).
+- **Limitations** — genuine, current boundaries: laptop/CPU-first execution, sklearn/PyTorch as the
+  only adapters, no GPU-scale or cluster support, no authentication on the API/UI. Full list:
+  [docs/limitations.md](docs/limitations.md).
+- **Future work** — provisional directions only, clearly marked as drafts:
+  [docs/roadmap.md](docs/roadmap.md), [docs/research-questions.md](docs/research-questions.md).
+
+Invariants preserved throughout, not just claimed: evidence before claims; missing evidence is
+never treated as a negative result; uncertainty and conflicting evidence are preserved, not
+resolved away; statistical assumptions stay visible; benchmark comparisons require a compatible
+protocol; no universal reliability score; no universal "best model"; reports never silently rerun
+an experiment. See [docs/observation-vs-conclusion.md](docs/observation-vs-conclusion.md).
+
+## What EXPERIONYX does not claim to solve
+
+- It does not decide whether one model is "better" than another — no composite score, ranking, or
+  verdict, ever ([docs/leaderboard.md](docs/leaderboard.md), [docs/reliability.md](docs/reliability.md)).
+- It does not infer causation from an observational comparison, a fault effect, or a failure
+  cluster ([docs/observation-vs-conclusion.md](docs/observation-vs-conclusion.md)).
+- It does not promise bit-for-bit reproducibility the underlying platform cannot guarantee.
+- It is not a GPU-scale or cluster-scale system — laptop-first, CPU-first, small public datasets.
+
+## Citation
+
+If you use EXPERIONYX in your work, see [CITATION.cff](CITATION.cff).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, linting, mypy, and the scientific-
+integrity and reproducibility expectations for pull requests. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+and [SECURITY.md](SECURITY.md) apply to all participation.
 
 ## License
 
