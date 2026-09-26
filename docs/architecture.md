@@ -72,7 +72,9 @@ Definitions and distinctions: [experiment-lifecycle.md](experiment-lifecycle.md)
 - **Provenance:** every observation links to its run, environment, inputs and seed.
 - **Storage:** local-first (files + embedded database); large data and weights never committed.
 - **Adapters:** third-party ML libraries live behind adapters and are optional extras, keeping
-  the core dependency-free.
+  the importable library dependency-free. The `experionyx` CLI itself is not: it dispatches to
+  every subsystem from one module, so it needs the `faults` extra (numpy) even for commands
+  unrelated to fault injection ([limitations](limitations.md)).
 - **Testing:** real behavior, deterministic seeds, no tests that only inflate counts.
 - **API/UI:** thin layers over the same application services; introduced late.
 - **Resources:** CPU-first, cached, resumable, bounded parallelism; no clusters or paid services.

@@ -22,7 +22,8 @@ classifiers = [
 [project.optional-dependencies]
 sklearn = ["scikit-learn>=1.4"]
 torch = ["torch>=2.2"]
-# The fault library needs numpy (also pulled in by sklearn); the core stays dependency-free.
+# The fault library needs numpy (also pulled in by sklearn); the importable package stays
+# dependency-free, but the CLI imports every subsystem eagerly, so it needs this extra too.
 faults = ["numpy>=1.26"]
 # The visualization/analysis UI (`experionyx viz serve`): a read-only FastAPI app + static SPA.
 viz = ["fastapi>=0.110,<1", "uvicorn>=0.30,<1"]

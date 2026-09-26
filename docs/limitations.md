@@ -18,6 +18,15 @@ doc, that doc is the source of truth, not this page.
   `UNAVAILABLE` for adapters that don't expose floating-point state — restoration afterward is
   exact, but the perturbation itself is never approximated.
 
+## Packaging and CLI
+
+- The importable library (domain, registry, graph, reporting) has no runtime dependencies. The
+  `experionyx` CLI wires every subsystem into one dispatcher at import time, so `pip install
+  experionyx` with no extras fails on the first command — install at least `.[faults]` (numpy),
+  which nearly every command needs transitively even when it doesn't touch fault injection
+  directly. This is a packaging rough edge in the CLI's import structure, not a hidden runtime
+  dependency of the library itself.
+
 ## Execution environment
 
 - Laptop-first: developed and validated on an 8 GB Apple Silicon machine, CPU-first, small public

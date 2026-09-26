@@ -219,8 +219,11 @@ resumable and bounded-parallel execution. No paid APIs, GPUs or clusters in the 
 
 ## Development
 
-Requires Python 3.11+. The core has no runtime dependencies; frameworks are extras:
-`pip install -e ".[sklearn]"`, `".[torch]"`, `".[faults]"` (numpy, for fault injection),
+Requires Python 3.11+. The importable library (domain, registry, graph, reporting) has no runtime
+dependencies. The `experionyx` CLI wires every subsystem into one dispatcher, so in practice it
+needs the `faults` extra (numpy) for anything beyond bare experiment/run bookkeeping — install it
+even if you don't inject faults yourself. Frameworks are extras: `pip install -e ".[sklearn]"`,
+`".[torch]"`, `".[faults]"` (numpy, required by the CLI — see [limitations](docs/limitations.md)),
 `".[viz]"` (FastAPI + uvicorn, for `experionyx viz serve`); add `dev` for the test tools.
 
 ```bash
