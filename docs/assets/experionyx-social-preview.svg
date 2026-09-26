@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="EXPERIONYX — AI Experimental Forensics and Reliability Laboratory. Experiment, evidence, reliability, reproducibility.">
+  <title>EXPERIONYX</title>
+  <desc>Social preview card: EXPERIONYX wordmark, subtitle, and a diagram showing evidence nodes converging through experiment, evidence, reliability, and reproducibility stages.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e14"/>
+      <stop offset="1" stop-color="#111826"/>
+    </linearGradient>
+    <linearGradient id="accent2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3ecfb2"/>
+      <stop offset="1" stop-color="#4c8dff"/>
+    </linearGradient>
+    <style>
+      .stage { font-family:'JetBrains Mono','Menlo',monospace; font-size:20px; fill:#8b98a5; }
+      .node { fill:#141b24; stroke:#2a3646; stroke-width:1.5; }
+    </style>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg2)"/>
+
+  <text x="90" y="220" font-family="'JetBrains Mono','Menlo',monospace" font-size="86" font-weight="700" fill="#eef2f6" letter-spacing="1">EXPERIONYX</text>
+  <text x="93" y="270" font-family="'JetBrains Mono','Menlo',monospace" font-size="28" fill="#8b98a5">AI Experimental Forensics &amp; Reliability Laboratory</text>
+
+  <!-- flow -->
+  <g>
+    <rect class="node" x="90" y="360" width="220" height="64" rx="10"/>
+    <text class="stage" x="115" y="400">Experiment</text>
+
+    <rect class="node" x="360" y="360" width="220" height="64" rx="10"/>
+    <text class="stage" x="385" y="400">Evidence</text>
+
+    <rect class="node" x="630" y="360" width="240" height="64" rx="10"/>
+    <text class="stage" x="655" y="400">Reliability</text>
+
+    <rect class="node" x="920" y="360" width="270" height="64" rx="10"/>
+    <text class="stage" x="945" y="400">Reproducibility</text>
+
+    <g stroke="url(#accent2)" stroke-width="3" fill="none" marker-end="url(#a3)">
+      <line x1="310" y1="392" x2="356" y2="392"/>
+      <line x1="580" y1="392" x2="626" y2="392"/>
+      <line x1="870" y1="392" x2="916" y2="392"/>
+    </g>
+    <defs>
+      <marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#4c8dff"/>
+      </marker>
+    </defs>
+  </g>
+
+  <text x="90" y="470" font-family="'JetBrains Mono','Menlo',monospace" font-size="15" fill="#5b6b7f">Controlled experimentation · failure discovery · statistical analysis · provenance · evidence dossiers</text>
+
+  <rect x="0" y="630" width="1280" height="10" fill="url(#accent2)"/>
+</svg>

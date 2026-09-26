@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" width="900" height="900" role="img" aria-label="EXPERIONYX architecture: CLI and API/UI over domain, engines, and persistence layers">
+  <title>EXPERIONYX architecture</title>
+  <desc>Layered architecture: CLI and the read-only visualization API/UI sit on top; both call the same analysis engines (faults, failures, interactions, reliability, statistics, drift, data quality, stress, calibration, resources, scheduler); engines read and write the domain/registry layer; the knowledge graph, reproducibility, benchmark/leaderboard, and reporting/dossier layers are derived, read-only views over the same persisted evidence; everything rests on SQLite persistence and content-addressed artifact storage.</desc>
+  <defs>
+    <style>
+      .box { fill:#141b24; stroke:#2a3646; stroke-width:1.5; rx:8; }
+      .boxalt { fill:#121821; stroke:#233040; stroke-width:1.5; rx:8; }
+      .title { font-family:'JetBrains Mono','Menlo',monospace; font-size:15px; font-weight:700; fill:#eef2f6; }
+      .sub { font-family:'JetBrains Mono','Menlo',monospace; font-size:11px; fill:#8b98a5; }
+      .layer { font-family:'JetBrains Mono','Menlo',monospace; font-size:11px; fill:#4c8dff; letter-spacing:1px; }
+      .arrow { stroke:#3ecfb2; stroke-width:1.6; fill:none; marker-end:url(#a2); }
+    </style>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3ecfb2"/>
+    </marker>
+  </defs>
+  <rect width="900" height="900" fill="#0a0e14"/>
+
+  <text class="layer" x="40" y="36">INTERFACE</text>
+  <rect class="box" x="40" y="44" width="380" height="60"/>
+  <text class="title" x="58" y="70">CLI (cli.py)</text>
+  <text class="sub" x="58" y="88">experionyx status / execute / faults / report ...</text>
+
+  <rect class="box" x="480" y="44" width="380" height="60"/>
+  <text class="title" x="498" y="70">API / Visualization UI</text>
+  <text class="sub" x="498" y="88">api/ — FastAPI + static JS, read-only over the same calls</text>
+
+  <line class="arrow" x1="230" y1="104" x2="230" y2="132"/>
+  <line class="arrow" x1="670" y1="104" x2="670" y2="132"/>
+
+  <text class="layer" x="40" y="128">ANALYSIS ENGINES</text>
+  <rect class="boxalt" x="40" y="136" width="820" height="76"/>
+  <text class="title" x="58" y="160">faults · failures · interactions · reliability · stats</text>
+  <text class="title" x="58" y="180">drift · data_quality · stress · calibration · resources · scheduler</text>
+  <text class="sub" x="58" y="200">Each engine owns its own domain logic; the CLI and API only call existing get/find/compare methods.</text>
+
+  <line class="arrow" x1="230" y1="212" x2="230" y2="240"/>
+  <line class="arrow" x1="670" y1="212" x2="670" y2="240"/>
+
+  <text class="layer" x="40" y="236">DERIVED / READ-SIDE LAYERS</text>
+  <rect class="box" x="40" y="244" width="260" height="70"/>
+  <text class="title" x="56" y="268">Knowledge Graph</text>
+  <text class="sub" x="56" y="286">graph/ — deterministic,</text>
+  <text class="sub" x="56" y="300">bounded traversal</text>
+
+  <rect class="box" x="320" y="244" width="260" height="70"/>
+  <text class="title" x="336" y="268">Reproducibility</text>
+  <text class="sub" x="336" y="286">reproducibility/ — classifies</text>
+  <text class="sub" x="336" y="300">each engine's replay_check</text>
+
+  <rect class="box" x="600" y="244" width="260" height="70"/>
+  <text class="title" x="616" y="268">Benchmark / Leaderboard</text>
+  <text class="sub" x="616" y="286">benchmark/, leaderboard/ —</text>
+  <text class="sub" x="616" y="300">protocol-scoped comparison</text>
+
+  <line class="arrow" x1="170" y1="314" x2="170" y2="342"/>
+  <line class="arrow" x1="450" y1="314" x2="450" y2="342"/>
+  <line class="arrow" x1="730" y1="314" x2="730" y2="342"/>
+
+  <text class="layer" x="40" y="338">RESEARCH OUTPUT</text>
+  <rect class="boxalt" x="40" y="346" width="400" height="60"/>
+  <text class="title" x="56" y="372">Reporting</text>
+  <text class="sub" x="56" y="390">reporting/ — versioned, evidence-only reports</text>
+
+  <rect class="boxalt" x="460" y="346" width="400" height="60"/>
+  <text class="title" x="476" y="372">Evidence Dossiers</text>
+  <text class="sub" x="476" y="390">dossier/ — sufficiency analysis, immutable snapshots</text>
+
+  <line class="arrow" x1="230" y1="406" x2="230" y2="434"/>
+  <line class="arrow" x1="670" y1="406" x2="670" y2="434"/>
+
+  <text class="layer" x="40" y="430">DOMAIN / REGISTRY</text>
+  <rect class="box" x="40" y="438" width="820" height="70"/>
+  <text class="title" x="58" y="462">domain.py + registry.py + sqlite.py</text>
+  <text class="sub" x="58" y="482">Immutable, validated entities; append-only registry protocol; SQLite backend with transactions and schema migrations.</text>
+
+  <line class="arrow" x1="450" y1="508" x2="450" y2="536"/>
+
+  <text class="layer" x="40" y="532">ADAPTERS &amp; EXECUTION</text>
+  <rect class="box" x="40" y="540" width="400" height="60"/>
+  <text class="title" x="56" y="566">execution.py + provenance.py</text>
+  <text class="sub" x="56" y="584">traced Run, environment/seed/config capture</text>
+
+  <rect class="box" x="460" y="540" width="400" height="60"/>
+  <text class="title" x="476" y="566">adapters/</text>
+  <text class="sub" x="476" y="584">typed model/dataset adapters (sklearn, torch — optional)</text>
+
+  <line class="arrow" x1="230" y1="600" x2="230" y2="628"/>
+  <line class="arrow" x1="670" y1="600" x2="670" y2="628"/>
+
+  <text class="layer" x="40" y="624">PERSISTENCE</text>
+  <rect class="boxalt" x="40" y="632" width="400" height="60"/>
+  <text class="title" x="56" y="658">SQLite registry.sqlite</text>
+  <text class="sub" x="56" y="676">one file per workspace, schema-versioned</text>
+
+  <rect class="boxalt" x="460" y="632" width="400" height="60"/>
+  <text class="title" x="476" y="658">artifacts.py — LocalArtifactStore</text>
+  <text class="sub" x="476" y="676">content-addressed, SHA-256 verified on read</text>
+</svg>

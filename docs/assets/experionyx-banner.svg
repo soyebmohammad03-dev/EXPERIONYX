@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260" width="1200" height="260" role="img" aria-label="EXPERIONYX — AI Experimental Forensics and Reliability Laboratory">
+  <title>EXPERIONYX</title>
+  <desc>Wordmark and mark for EXPERIONYX, an AI experimental forensics and reliability laboratory. The mark shows evidence nodes converging into a single traced path, representing provenance-linked evidence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0e14"/>
+      <stop offset="1" stop-color="#10161f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3ecfb2"/>
+      <stop offset="1" stop-color="#4c8dff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="260" fill="url(#bg)"/>
+  <!-- evidence-graph mark -->
+  <g stroke="#2a3646" stroke-width="1.5" fill="none">
+    <line x1="90" y1="70" x2="150" y2="130"/>
+    <line x1="90" y1="190" x2="150" y2="130"/>
+    <line x1="150" y1="130" x2="150" y2="70"/>
+    <line x1="150" y1="70" x2="205" y2="130"/>
+    <line x1="150" y1="130" x2="205" y2="130"/>
+    <line x1="205" y1="130" x2="150" y2="190"/>
+  </g>
+  <g stroke="url(#accent)" stroke-width="2.5" fill="none">
+    <line x1="205" y1="130" x2="150" y2="130"/>
+  </g>
+  <circle cx="90" cy="70" r="5" fill="#5b6b7f"/>
+  <circle cx="90" cy="190" r="5" fill="#5b6b7f"/>
+  <circle cx="150" cy="70" r="5" fill="#5b6b7f"/>
+  <circle cx="150" cy="190" r="5" fill="#5b6b7f"/>
+  <circle cx="150" cy="130" r="7" fill="#3ecfb2"/>
+  <circle cx="205" cy="130" r="7" fill="#4c8dff"/>
+
+  <text x="250" y="128" font-family="'JetBrains Mono','Menlo',monospace" font-size="56" font-weight="700" fill="#eef2f6" letter-spacing="1">EXPERIONYX</text>
+  <text x="252" y="164" font-family="'JetBrains Mono','Menlo',monospace" font-size="19" fill="#8b98a5" letter-spacing="0.5">AI Experimental Forensics &amp; Reliability Laboratory</text>
+  <text x="252" y="196" font-family="'JetBrains Mono','Menlo',monospace" font-size="14" fill="#5b6b7f">experiment &#8594; evidence &#8594; reliability &#8594; reproducibility</text>
+
+  <rect x="0" y="255" width="1200" height="5" fill="url(#accent)"/>
+</svg>

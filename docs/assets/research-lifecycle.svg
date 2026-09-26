@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1220" width="720" height="1220" role="img" aria-label="EXPERIONYX research lifecycle: fifteen stages from model and dataset registration through visualization">
+  <title>EXPERIONYX research lifecycle</title>
+  <desc>A vertical flow of the fifteen real stages a research investigation passes through in EXPERIONYX, from registering a model and dataset to inspecting results in the visualization UI. Each stage persists evidence the next stage reads; nothing is re-executed downstream.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4c8dff"/>
+    </marker>
+    <style>
+      .stage { fill:#141b24; stroke:#2a3646; stroke-width:1.5; }
+      .stage-alt { fill:#121821; stroke:#233040; stroke-width:1.5; }
+      .label { font-family:'JetBrains Mono','Menlo',monospace; font-size:16px; fill:#eef2f6; font-weight:600; }
+      .sub { font-family:'JetBrains Mono','Menlo',monospace; font-size:11px; fill:#8b98a5; }
+      .edge { stroke:#4c8dff; stroke-width:1.6; fill:none; }
+      .bg { fill:#0a0e14; }
+    </style>
+  </defs>
+  <rect class="bg" width="720" height="1220"/>
+
+  <!-- generated programmatically below: 15 stages, 78px pitch, starting y=30 -->
+  <g>
+    <!-- 1 -->
+    <rect class="stage" x="110" y="20" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="46">Model / Dataset</text>
+    <text class="sub" x="130" y="64">adapters.registry — registered, fingerprinted</text>
+
+    <line class="edge" x1="360" y1="76" x2="360" y2="98" marker-end="url(#arrow)"/>
+
+    <!-- 2 -->
+    <rect class="stage-alt" x="110" y="98" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="124">Experiment</text>
+    <text class="sub" x="130" y="142">domain.Experiment — a registered, versioned intent</text>
+
+    <line class="edge" x1="360" y1="154" x2="360" y2="176" marker-end="url(#arrow)"/>
+
+    <!-- 3 -->
+    <rect class="stage" x="110" y="176" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="202">Execution + Provenance</text>
+    <text class="sub" x="130" y="220">execution — traced Run, environment, seed, config</text>
+
+    <line class="edge" x1="360" y1="232" x2="360" y2="254" marker-end="url(#arrow)"/>
+
+    <!-- 4 -->
+    <rect class="stage-alt" x="110" y="254" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="280">Baseline Evaluation</text>
+    <text class="sub" x="130" y="298">evaluation — metrics, calibration, slices, findings</text>
+
+    <line class="edge" x1="360" y1="310" x2="360" y2="332" marker-end="url(#arrow)"/>
+
+    <!-- 5 -->
+    <rect class="stage" x="70" y="332" width="580" height="56" rx="8"/>
+    <text class="label" x="90" y="358">Fault / Stress / Data Quality</text>
+    <text class="sub" x="90" y="376">faults, stress, data_quality — controlled perturbation</text>
+
+    <line class="edge" x1="360" y1="388" x2="360" y2="410" marker-end="url(#arrow)"/>
+
+    <!-- 6 -->
+    <rect class="stage-alt" x="110" y="410" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="436">Failure Discovery</text>
+    <text class="sub" x="130" y="454">failures — signals, similarity, clustering</text>
+
+    <line class="edge" x1="360" y1="466" x2="360" y2="488" marker-end="url(#arrow)"/>
+
+    <!-- 7 -->
+    <rect class="stage" x="110" y="488" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="514">Statistical Analysis</text>
+    <text class="sub" x="130" y="532">stats — intervals, effect sizes, corrections</text>
+
+    <line class="edge" x1="360" y1="544" x2="360" y2="566" marker-end="url(#arrow)"/>
+
+    <!-- 8 -->
+    <rect class="stage-alt" x="110" y="566" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="592">Reliability / Robustness</text>
+    <text class="sub" x="130" y="610">reliability, interactions — per-dimension status, no score</text>
+
+    <line class="edge" x1="360" y1="622" x2="360" y2="644" marker-end="url(#arrow)"/>
+
+    <!-- 9 -->
+    <rect class="stage" x="70" y="644" width="580" height="56" rx="8"/>
+    <text class="label" x="90" y="670">Distribution Shift / Calibration / Resources</text>
+    <text class="sub" x="90" y="688">drift, calibration, resources — longitudinal &amp; systems evidence</text>
+
+    <line class="edge" x1="360" y1="700" x2="360" y2="722" marker-end="url(#arrow)"/>
+
+    <!-- 10 -->
+    <rect class="stage-alt" x="110" y="722" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="748">Knowledge &amp; Failure Graph</text>
+    <text class="sub" x="130" y="766">graph — deterministic, bounded traversal over all evidence</text>
+
+    <line class="edge" x1="360" y1="778" x2="360" y2="800" marker-end="url(#arrow)"/>
+
+    <!-- 11 -->
+    <rect class="stage" x="110" y="800" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="826">Reproducibility</text>
+    <text class="sub" x="130" y="844">reproducibility — classified agreement, never a binary flag</text>
+
+    <line class="edge" x1="360" y1="856" x2="360" y2="878" marker-end="url(#arrow)"/>
+
+    <!-- 12 -->
+    <rect class="stage-alt" x="110" y="878" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="904">Benchmarking</text>
+    <text class="sub" x="130" y="922">benchmark, leaderboard — protocol-scoped comparison only</text>
+
+    <line class="edge" x1="360" y1="934" x2="360" y2="956" marker-end="url(#arrow)"/>
+
+    <!-- 13 -->
+    <rect class="stage" x="110" y="956" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="982">Research Reporting</text>
+    <text class="sub" x="130" y="1000">reporting — assembled from persisted evidence, never re-run</text>
+
+    <line class="edge" x1="360" y1="1012" x2="360" y2="1034" marker-end="url(#arrow)"/>
+
+    <!-- 14 -->
+    <rect class="stage-alt" x="110" y="1034" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="1060">Evidence Dossier</text>
+    <text class="sub" x="130" y="1078">dossier — sufficiency analysis, immutable snapshot</text>
+
+    <line class="edge" x1="360" y1="1090" x2="360" y2="1112" marker-end="url(#arrow)"/>
+
+    <!-- 15 -->
+    <rect class="stage" x="110" y="1112" width="500" height="56" rx="8"/>
+    <text class="label" x="130" y="1138">Visualization</text>
+    <text class="sub" x="130" y="1156">api/viz — read-only inspection of every stage above</text>
+  </g>
+</svg>
