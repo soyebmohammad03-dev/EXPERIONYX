@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: >-
+  If you use EXPERIONYX in your work, please cite it using the metadata below.
+title: EXPERIONYX
+abstract: >-
+  An AI experimental forensics and reliability laboratory for controlled experimentation,
+  failure discovery, statistical analysis, reproducibility, provenance, benchmarking, and
+  evidence-backed research reporting.
+type: software
+authors:
+  - name: "Soyeb Mohammad"
+repository-code: "https://github.com/soyebmohammad03-dev/EXPERIONYX"
+license: MIT
+version: 0.0.1
+date-released: "2026-09-26"
+keywords:
+  - artificial-intelligence
+  - machine-learning
+  - reliability
+  - reproducibility
+  - fault-injection
+  - failure-analysis
+  - statistical-analysis
+  - provenance
